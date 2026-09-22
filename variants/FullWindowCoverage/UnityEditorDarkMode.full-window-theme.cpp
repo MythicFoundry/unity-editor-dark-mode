@@ -392,13 +392,6 @@ static bool IsTopLevelWindow(HWND hWnd) {
     return (GetWindowLongPtrW(hWnd, GWL_STYLE) & WS_CHILD) == 0;
 }
 
-static bool IsPopupMenuWindow(HWND hWnd) {
-    // Popup menus already have a dedicated dark-mode path in this plugin.
-    // Letting the general top-level-window hook subclass #32768 changes their
-    // established Unity appearance and can interfere with native menu drawing.
-    return IsWndClass(hWnd, L"#32768");
-}
-
 static bool IsKnownContainerClass(HWND hWnd) {
     return IsUnityWndClass(hWnd) ||
         IsWndClass(hWnd, L"#32770") ||
@@ -437,8 +430,7 @@ static bool IsKnownControlClass(HWND hWnd) {
 }
 
 static bool ShouldThemeWindow(HWND hWnd) {
-    return !IsPopupMenuWindow(hWnd) &&
-        (IsTopLevelWindow(hWnd) || IsKnownContainerClass(hWnd) || IsKnownControlClass(hWnd));
+    return IsTopLevelWindow(hWnd) || IsKnownContainerClass(hWnd) || IsKnownControlClass(hWnd);
 }
 
 static void LogUnknownWindow(HWND hWnd) {
@@ -550,7 +542,7 @@ static void ThemeWindow(HWND hWnd) {
             hWnd,
             nullptr,
             nullptr,
-            RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN);
+            RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
     }
 }
 
@@ -575,7 +567,7 @@ static BOOL CALLBACK ThemeChildWindow(HWND hWnd, LPARAM) {
 }
 
 static void ThemeWindowTree(HWND hWnd) {
-    if (!hWnd || !IsWindow(hWnd) || IsPopupMenuWindow(hWnd)) return;
+    if (!hWnd || !IsWindow(hWnd)) return;
     g_hookStage = 0x30;
     ThemeWindow(hWnd);
     g_hookStage = 0x31;
@@ -603,7 +595,7 @@ static LRESULT CALLBACK ApplyThemeCallWndProc(int nCode, WPARAM wParam, LPARAM l
 }
 
 static void ThemeWindowOnOwningThread(HWND hWnd) {
-    if (!hWnd || !IsWindow(hWnd) || !IsCurrentProcessWindow(hWnd) || IsPopupMenuWindow(hWnd)) return;
+    if (!hWnd || !IsWindow(hWnd) || !IsCurrentProcessWindow(hWnd)) return;
 
     DWORD processId = 0;
     const DWORD threadId = GetWindowThreadProcessId(hWnd, &processId);
@@ -979,11 +971,7 @@ static LRESULT CallWndSubClassProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPAR
         case WM_SHOWWINDOW:
         {
             if (wParam) {
-                // This runs synchronously on the owning UI thread. It is late
-                // enough for native controls to be initialized, but early
-                // enough to avoid a light first paint while Unity is blocked
-                // in managed callbacks or a domain reload.
-                ApplyControlTheme(hWnd);
+                EnableDarkMode(hWnd);
                 EnumChildWindows(hWnd, ThemeChildWindow, 0);
             }
             break;
@@ -1157,7 +1145,7 @@ static BOOL CALLBACK AttachExistingChildWindow(HWND hWnd, LPARAM) {
 }
 
 static void AttachExistingWindow(HWND hWnd) {
-    if (!IsCurrentProcessWindow(hWnd) || IsPopupMenuWindow(hWnd)) return;
+    if (!IsCurrentProcessWindow(hWnd)) return;
 
     EnableDarkMode(hWnd);
     if (GetWindowThreadProcessId(hWnd, nullptr) == GetCurrentThreadId()) {
@@ -1193,10 +1181,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             }
 
             // CBT gives synchronous coverage for Unity's main GUI thread. The
-            // process-scoped in-context WinEvent hook supplements it for dialogs
-            // created by other Unity-owned UI threads. EVENT_OBJECT_SHOW runs on
-            // the owner before the first stable paint, even while Unity blocks
-            // the main thread for managed callbacks or a domain reload.
+            // process-scoped WinEvent hook supplements it for dialogs created by
+            // other Unity-owned UI threads and themes them on their owning thread.
             g_hook = SetWindowsHookExW(WH_CBT, CBTProc, nullptr, GetCurrentThreadId());
             g_windowEventHook = SetWinEventHook(
                 EVENT_OBJECT_SHOW,
@@ -1205,7 +1191,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
                 WindowEventProc,
                 g_processId,
                 0,
-                WINEVENT_INCONTEXT);
+                WINEVENT_OUTOFCONTEXT);
 
             g_ready = true;
             break;

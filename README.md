@@ -8,7 +8,8 @@ A fully working runtime dark mode mod for Unity Editor on Windows with:
 - Dark title bar
 - Dark menu bar
 - Dark context menu
-- And more...
+- Dark Unity-owned native dialogs and progress windows
+- Dark standard controls, including buttons, labels, edit fields, lists, trees, tabs, tooltips, and progress bars
 
 > This runtime mod works on Windows 11 and Windows 10 1903+. Tested on Unity 2019, 2020, 2021, 2022, 2023 and Unity 6.
 
@@ -84,7 +85,19 @@ menubar_bgcolor = 48,48,48
 menubaritem_bgcolor = 48,48,48
 menubaritem_bgcolor_hot = 62,62,62
 menubaritem_bgcolor_selected = 62,62,62
+dialog_textcolor = 210,210,210
+dialog_textcolor_disabled = 145,145,145
+dialog_bgcolor = 48,48,48
+control_bgcolor = 58,58,58
+control_bgcolor_hot = 72,72,72
+control_bgcolor_pressed = 42,42,42
+control_bordercolor = 96,96,96
+progress_bgcolor = 64,64,64
+progress_barcolor = 58,121,187
+log_unknown_windows = false
 ```
+
+Existing INI files remain compatible. Any missing dialog or control color uses the default shown above. Set `log_unknown_windows = true` to emit unhandled Unity child-window class names through `OutputDebugString`; this is intended only for diagnosing new Unity or Windows versions.
 
 ## How to remove it?
 Remove the DLL from your project and restart Unity Editor (You need to close the editor before deleting the DLL).
@@ -104,12 +117,15 @@ This project is basically a stripped down version of [ReaperThemeHackDll](https:
 
 Ok, so what I have done on top of `ReaperThemeHackDll` is:
 - Remove all the unnecessary dependencies of Reaper framework and plugin code since we don't need them for Unity Editor hack.
-- Instead of checking the window class name of `REAPERwnd` when doing the sub-classing using `SetWindowSubclass` API, I use `UnityContainerWndClass` instead, which is the window class name of Unity Editor main window. You can get this window class name by using below Win32 API:
+- Discover top-level windows owned by the current Unity process instead of relying only on `UnityContainerWndClass`. Known standard controls are themed with class-specific handling, while unknown custom-drawn child controls are left to Unity.
+- Use a synchronous CBT hook for Unity's main UI thread plus a process-filtered WinEvent hook for windows created on other Unity UI threads. Cross-thread windows are subclassed on their owning thread.
+- Apply the Windows immersive-dark-mode attributes and private UxTheme opt-in dynamically, then custom-paint legacy dialog backgrounds, text, buttons, and progress bars where Windows does not provide a complete dark style.
+- `UnityContainerWndClass` remains the window class name of Unity Editor's main window. You can inspect a window class with the following Win32 API:
     ```C#
     [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern int GetClassName(IntPtr hWnd, char[] lpClassName, int nMaxCount);
     ```
-- I have verified that the window class name is consistent across different Unity Editor versions (2019, 2020, 2021, 2022, 2023, Unity 6) so it should work on most versions. If not, you should probably make further modifications to the code to use the C++ `GetClassName` Win32 API to get the window class name dynamically at runtime.
+- `UnityContainerWndClass` has remained consistent across Unity 2019 through Unity 6, but modal and progress-window classes vary. Process ownership and runtime class inspection allow those windows to be covered without hard-coding every top-level class.
 
   > **NOTE:** If you do this, it basically means this hack can be used for any Windows application that uses the default white Win32 title bar, menu bar, context menu, etc.
 - A different color preset is given by default which I think looks better with Unity Editor.
@@ -127,4 +143,7 @@ Ok, so what I have done on top of `ReaperThemeHackDll` is:
     ```
 
 ## Known issues
-> I haven't found any major issues so far. Please let me know if you find any issues by creating an issue in this repository. 
+- The DLL can theme native windows and controls hosted by `Unity.exe`. It cannot theme Unity Hub, crash handlers, browsers, version-control clients, or other external processes.
+- Windows-owned file, folder, credential, and UAC dialogs ultimately follow the Windows version and system theme. The plugin opts eligible in-process common dialogs into dark mode, but cannot guarantee every shell surface.
+- IMGUI and UI Toolkit content is rendered by Unity. Unity's built-in editor skin is normally already dark; custom editor extensions with hard-coded light colors must be fixed in those extensions.
+- Very early startup UI shown before Unity loads preloaded native plugins cannot be changed by project installation. Launch-time DLL injection can cover more of that phase.

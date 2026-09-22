@@ -39,5 +39,20 @@ add_library(${PROJECT_NAME} SHARED
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE ${INIPP_INCLUDE_DIRS})
+if (MSVC)
+  target_compile_options(${PROJECT_NAME} PRIVATE /W4 /permissive- /utf-8)
+endif()
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT ${PROJECT_NAME})
 set_target_properties(${PROJECT_NAME} PROPERTIES LINK_FLAGS "/DEF:\"${CMAKE_CURRENT_SOURCE_DIR}/${PROJECT_NAME}.def\"")
+
+option(UNITY_EDITOR_DARK_MODE_BUILD_HARNESS "Build the native dialog visual test harness" ON)
+if (UNITY_EDITOR_DARK_MODE_BUILD_HARNESS)
+  add_executable(UnityEditorDarkModeHarness tests/DialogHarness.cpp)
+  add_dependencies(UnityEditorDarkModeHarness ${PROJECT_NAME})
+  if (MSVC)
+    target_compile_options(UnityEditorDarkModeHarness PRIVATE /W4 /permissive- /utf-8)
+    target_link_options(UnityEditorDarkModeHarness PRIVATE
+      "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'"
+    )
+  endif()
+endif()
