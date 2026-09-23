@@ -1,5 +1,6 @@
 #define WIN32_LEAN_AND_MEAN
 #include <cstdio>
+#include <cwchar>
 #include <windows.h>
 #include <commctrl.h>
 
@@ -83,6 +84,18 @@ int wmain() {
         return 1;
     }
     Trace("Loaded plugin.");
+
+    {
+        HMODULE uxtheme = GetModuleHandleW(L"uxtheme.dll");
+        using SetPreferredAppMode = int(WINAPI*)(int);
+        auto setPreferredAppMode = uxtheme
+            ? reinterpret_cast<SetPreferredAppMode>(GetProcAddress(uxtheme, MAKEINTRESOURCEA(135)))
+            : nullptr;
+        if (setPreferredAppMode) {
+            setPreferredAppMode(3); // ForceLight, simulating an explicit Unity override.
+            Trace("Reset process app mode to ForceLight before creating the window.");
+        }
+    }
 
     WNDCLASSEXW windowClass = {};
     windowClass.cbSize = sizeof(windowClass);
