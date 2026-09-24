@@ -27,6 +27,15 @@ foreach ($requiredFile in @($dllPath, $metaPath, $configPath, "$configPath.meta"
     }
 }
 
+if (-not (Test-Path -LiteralPath (Join-Path $packageRoot 'Editor.meta') -PathType Leaf)) {
+    throw 'The Editor folder must have a committed .meta file.'
+}
+foreach ($asset in (Get-ChildItem -LiteralPath $packageRoot -Recurse -File | Where-Object Name -NotLike '*.meta')) {
+    if (-not (Test-Path -LiteralPath "$($asset.FullName).meta" -PathType Leaf)) {
+        throw "Package asset has no committed .meta file: $($asset.FullName)"
+    }
+}
+
 $meta = Get-Content -LiteralPath $metaPath -Raw
 if ($meta -cnotmatch '(?m)^  isPreloaded: 1\r?$' -or
     $meta -cnotmatch '(?ms)Editor: Editor\s+second:\s+enabled: 1\s+settings:\s+CPU: AnyCPU\s+DefaultValueInitialized: true\s+OS: Windows' -or
