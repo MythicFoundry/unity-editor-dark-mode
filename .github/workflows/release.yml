@@ -1,0 +1,42 @@
+name: Release
+
+on:
+  push:
+    tags: [ "v*" ]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Validate tagged UPM package
+      shell: pwsh
+      run: |
+        if (-not $env:GITHUB_REF_NAME.StartsWith('v')) {
+          throw "Expected a version tag, got $env:GITHUB_REF_NAME"
+        }
+        ./scripts/Test-UpmPackage.ps1 -ExpectedVersion $env:GITHUB_REF_NAME.Substring(1)
+
+    - name: Setup MSVC toolchain
+      uses: ilammy/msvc-dev-cmd@v1
+
+    - name: Install CMake
+      uses: lukka/get-cmake@latest
+
+    - name: Verify native source builds
+      run: cmake -B build && cmake --build build --config Release
+
+    - name: Publish GitHub release with the packaged DLL
+      shell: pwsh
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        $dll = 'Packages/com.mythicfoundry.unity-editor-dark-mode/Editor/UnityEditorDarkMode.dll'
+        $flags = @('--verify-tag', '--generate-notes')
+        if ($env:GITHUB_REF_NAME.Contains('-')) { $flags += '--prerelease' }
+        gh release create $env:GITHUB_REF_NAME $dll @flags

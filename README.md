@@ -1,5 +1,5 @@
 # DarkMode Mod for Unity Editor on Windows
- <a style="text-decoration:none" href="https://github.com/0x7c13/UnityEditor-DarkMode/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/0x7c13/UnityEditor-DarkMode/ci.yml?style=flat-square" alt="Build Status" /></a>
+ <a style="text-decoration:none" href="https://github.com/MythicFoundry/unity-editor-dark-mode/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/MythicFoundry/unity-editor-dark-mode/ci.yml?style=flat-square" alt="Build Status" /></a>
 <a style="text-decoration:none" href="https://assetstore.unity.com/packages/slug/281842">
 <img src="https://img.shields.io/badge/Unity%20AssetStore-Download-orange.svg?style=flat-square" alt="AssetStore Link" />
 </a>
@@ -14,6 +14,18 @@ A fully working runtime dark mode mod for Unity Editor on Windows with:
 > This runtime mod works on Windows 11 and Windows 10 1903+. Tested on Unity 2019, 2020, 2021, 2022, 2023 and Unity 6.
 
 ![Screenshot](screenshot.jpg?raw=true)
+
+## Unity Package Manager installation
+
+The Windows Editor plug-in is available as `com.mythicfoundry.unity-editor-dark-mode` from a version tag in this repository. After the corresponding tag has been published, add this entry to your Unity project's `Packages/manifest.json` dependencies:
+
+```json
+"com.mythicfoundry.unity-editor-dark-mode": "https://github.com/MythicFoundry/unity-editor-dark-mode.git?path=/Packages/com.mythicfoundry.unity-editor-dark-mode#v1.2.0-preview.1"
+```
+
+The package includes the native DLL and its importer settings, configured to preload in the Windows Editor only. Remove any existing `UnityEditorDarkMode.dll` under `Assets/Plugins` before installing the package; loading both copies is unsupported. Restart Unity yourself after installation or an update so the preloaded DLL can take effect.
+
+Git dependencies contain files committed at the tag. A DLL uploaded as a GitHub Release asset alone is not included in the Unity package dependency.
 
 ## Easy installation guide
 - Download the `UnityEditorDarkMode.unitypackage` from Unity [AssetStore](https://assetstore.unity.com/packages/slug/281842) or GitHub [Releases](https://github.com/0x7c13/UnityEditor-DarkMode/releases) and double click to install it to your Unity project.
@@ -111,6 +123,15 @@ Remove the DLL from your project and restart Unity Editor (You need to close the
     > NOTE: You may need to add `cmake` to your system path if you haven't already.
 
 - The `UnityEditorDarkMode.dll` will be created under the `build\Release` directory after the build finishes successfully.
+
+## How to prepare a UPM release
+
+1. Update the version in `Packages/com.mythicfoundry.unity-editor-dark-mode/package.json` and its `CHANGELOG.md`.
+2. Run `pwsh -File scripts/Stage-UpmPackage.ps1` to build and copy the DLL into the package folder. The script validates the package and its Windows x64 DLL. If CMake is not on `PATH`, pass its executable path with `-CMake`.
+3. Commit the source and staged package together. Push the commit and wait for CI to pass.
+4. Create and push a tag named `v<package-version>` on that commit. The tag workflow validates that the tag matches `package.json`, checks that the native source builds, and publishes a GitHub Release with the packaged DLL attached. Unity fetches the DLL from the tagged repository contents, not from the release attachment.
+
+Do not tag a version until its native UI behavior has been visually checked in Unity. Updating or testing a preloaded DLL requires a Unity restart; obtain permission before restarting someone else's Editor session.
 
 ## How it works?
 This project is basically a stripped down version of [ReaperThemeHackDll](https://github.com/jjYBdx4IL/ReaperThemeHackDll) made by [jjYBdx4IL](https://github.com/jjYBdx4IL) with some minor modifications. If you like this project, please consider giving a star to the `ReaperThemeHackDll` project as well. Actually, his code with some minor modifications can be used to theme any legacy Windows applications that uses the Win32 title bar, menu bar, context menu, etc.
