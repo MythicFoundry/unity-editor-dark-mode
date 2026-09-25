@@ -655,9 +655,16 @@ static void ApplyControlTheme(HWND hWnd) {
     else if (IsWndClass(hWnd, L"SysListView32")) {
         SetWindowTheme(hWnd, L"DarkMode_Explorer", nullptr);
     }
+    else if (IsWndClass(hWnd, L"Static")) {
+        // Disable themed painting for every static control. Text labels are
+        // custom-painted below, while owner-drawn/image/frame statics must stay
+        // available to their owning window instead of inheriting a light
+        // DarkMode_Explorer surface.
+        SetWindowTheme(hWnd, L"", L"");
+    }
     else if (IsWndClass(hWnd, L"msctls_trackbar32") ||
         IsWndClass(hWnd, L"msctls_hotkey32") ||
-        IsTextStatic(hWnd)) {
+        IsWndClass(hWnd, L"SysTabControl32")) {
         SetWindowTheme(hWnd, L"", L"");
     }
     else if (IsWndClass(hWnd, L"Button")) {
@@ -671,11 +678,17 @@ static void ApplyControlTheme(HWND hWnd) {
             }
             SetWindowTheme(hWnd, L"", L"");
         }
-        else {
-            // Windows 10's themed check/radio renderer can keep black text even
-            // after dark mode is enabled. Classic rendering honors the parent's
-            // WM_CTLCOLORBTN colors while retaining native input behavior.
+        else if (IsCheckOrRadioButton(hWnd)) {
+            // Retain the Explorer theme for native hit testing while the
+            // subclass owns painting. Empty themes can break checkbox and radio
+            // interaction on some Windows common-control versions.
+            SetWindowTheme(hWnd, L"DarkMode_Explorer", nullptr);
+        }
+        else if (IsGroupBox(hWnd)) {
             SetWindowTheme(hWnd, L"", L"");
+        }
+        else {
+            SetWindowTheme(hWnd, L"DarkMode_Explorer", nullptr);
         }
     }
     else if (IsKnownControlClass(hWnd) ||
@@ -1465,7 +1478,6 @@ static void PaintDropDownListCombo(HWND hWnd, HDC suppliedDeviceContext = nullpt
 static LRESULT CallWndSubClassProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass) {
     switch (uMsg) {
         case WM_CTLCOLORDLG:
-        case WM_CTLCOLORBTN:
         case WM_CTLCOLORSTATIC:
         {
             const theme_cfg* theme = LoadThemeConfig();
@@ -1479,6 +1491,20 @@ static LRESULT CallWndSubClassProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPAR
             SetBkColor(deviceContext, theme->dialog_bgcolor);
             SetBkMode(deviceContext, TRANSPARENT);
             return reinterpret_cast<LRESULT>(theme->dialog_bgbrush);
+        }
+        case WM_CTLCOLORBTN:
+        {
+            const theme_cfg* theme = LoadThemeConfig();
+            HDC deviceContext = reinterpret_cast<HDC>(wParam);
+            HWND child = reinterpret_cast<HWND>(lParam);
+            SetTextColor(
+                deviceContext,
+                child && !IsWindowEnabled(child)
+                    ? theme->dialog_textcolor_disabled
+                    : theme->dialog_textcolor);
+            SetBkColor(deviceContext, theme->control_bgcolor);
+            SetBkMode(deviceContext, OPAQUE);
+            return reinterpret_cast<LRESULT>(theme->control_bgbrush);
         }
         case WM_CTLCOLOREDIT:
         case WM_CTLCOLORLISTBOX:

@@ -29,9 +29,12 @@ struct WorkerDialogState {
     HWND checkbox = nullptr;
     HWND radio = nullptr;
     HWND groupBox = nullptr;
+    HWND progress = nullptr;
     HWND trackbar = nullptr;
     HWND hotkey = nullptr;
     HWND staticText = nullptr;
+    HWND ownerDrawStatic = nullptr;
+    HWND tabs = nullptr;
     int attempts = 0;
     bool passed = false;
     DWORD errorCode = ERROR_SUCCESS;
@@ -303,10 +306,10 @@ INT_PTR CALLBACK WorkerDialogProc(HWND dialog, UINT message, WPARAM, LPARAM lPar
                 -32000,
                 -32000,
                 440,
-                280,
+                360,
                 SWP_NOACTIVATE | SWP_NOZORDER);
             AddControl(dialog, L"Static", L"Building Player", SS_LEFT, 18, 18, 260, 22);
-            AddControl(
+            state->progress = AddControl(
                 dialog,
                 PROGRESS_CLASSW,
                 L"",
@@ -326,15 +329,29 @@ INT_PTR CALLBACK WorkerDialogProc(HWND dialog, UINT message, WPARAM, LPARAM lPar
                 100,
                 30,
                 kWorkerButtonId);
-            state->staticText = AddControl(dialog, L"Static", L"Native controls", SS_LEFT, 18, 126, 150, 22);
-            state->checkbox = AddControl(dialog, L"Button", L"Checkbox", BS_AUTOCHECKBOX, 18, 154, 120, 24);
-            state->radio = AddControl(dialog, L"Button", L"Radio", BS_AUTORADIOBUTTON, 150, 154, 100, 24);
-            state->groupBox = AddControl(dialog, L"Button", L"Group", BS_GROUPBOX, 265, 132, 150, 58);
-            state->trackbar = AddControl(dialog, TRACKBAR_CLASSW, L"", TBS_AUTOTICKS, 18, 196, 230, 34);
+            state->ownerDrawStatic = AddControl(
+                dialog,
+                L"Static",
+                L"com.mythicfoundry.mythic-mcp",
+                SS_OWNERDRAW,
+                18,
+                126,
+                400,
+                22);
+            state->staticText = AddControl(dialog, L"Static", L"Native controls", SS_LEFT, 18, 158, 150, 22);
+            state->checkbox = AddControl(dialog, L"Button", L"Checkbox", BS_AUTOCHECKBOX, 18, 186, 120, 24);
+            state->radio = AddControl(dialog, L"Button", L"Radio", BS_AUTORADIOBUTTON, 150, 186, 100, 24);
+            state->groupBox = AddControl(dialog, L"Button", L"Group", BS_GROUPBOX, 265, 164, 150, 58);
+            state->trackbar = AddControl(dialog, TRACKBAR_CLASSW, L"", TBS_AUTOTICKS, 18, 228, 230, 34);
             SendMessageW(state->trackbar, TBM_SETRANGE, TRUE, MAKELPARAM(0, 100));
             SendMessageW(state->trackbar, TBM_SETPOS, TRUE, 60);
-            state->hotkey = AddControl(dialog, HOTKEY_CLASSW, L"", WS_BORDER, 265, 202, 150, 28);
+            state->hotkey = AddControl(dialog, HOTKEY_CLASSW, L"", WS_BORDER, 265, 234, 150, 28);
             SendMessageW(state->hotkey, HKM_SETHOTKEY, MAKEWORD('K', HOTKEYF_CONTROL | HOTKEYF_SHIFT), 0);
+            state->tabs = AddControl(dialog, WC_TABCONTROLW, L"", WS_TABSTOP, 18, 274, 400, 38);
+            TCITEMW tabItem = {};
+            tabItem.mask = TCIF_TEXT;
+            tabItem.pszText = const_cast<wchar_t*>(L"General");
+            TabCtrl_InsertItem(state->tabs, 0, &tabItem);
             ApplyDefaultFont(dialog);
             SetTimer(dialog, 1, 20, nullptr);
             return TRUE;
@@ -351,7 +368,16 @@ INT_PTR CALLBACK WorkerDialogProc(HWND dialog, UINT message, WPARAM, LPARAM lPar
                 PaintsDarkClient(state->radio) &&
                 PaintsDarkClient(state->groupBox) &&
                 PaintsDarkClient(state->trackbar) &&
-                PaintsDarkClient(state->hotkey);
+                PaintsDarkClient(state->hotkey) &&
+                GetWindowTheme(state->progress) == nullptr &&
+                GetWindowTheme(state->staticText) == nullptr &&
+                GetWindowTheme(state->ownerDrawStatic) == nullptr &&
+                GetWindowTheme(state->checkbox) != nullptr &&
+                GetWindowTheme(state->radio) != nullptr &&
+                GetWindowTheme(state->groupBox) == nullptr &&
+                GetWindowTheme(state->trackbar) == nullptr &&
+                GetWindowTheme(state->hotkey) == nullptr &&
+                GetWindowTheme(state->tabs) == nullptr;
             ++state->attempts;
             if (state->passed || state->attempts >= 100) {
                 KillTimer(dialog, 1);
@@ -376,7 +402,7 @@ DWORD WINAPI WorkerDialogThread(void* parameter) {
     dialogTemplate.dialog.dwExtendedStyle = WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
     dialogTemplate.dialog.cdit = 0;
     dialogTemplate.dialog.cx = 220;
-    dialogTemplate.dialog.cy = 140;
+    dialogTemplate.dialog.cy = 180;
 
     const INT_PTR result = DialogBoxIndirectParamW(
         GetModuleHandleW(nullptr),
@@ -664,11 +690,19 @@ int wmain(int argumentCount, wchar_t* arguments[]) {
         return 3;
     }
     Trace("Initialized plugin after creating the harness window.");
+    if (!initializeDarkMode() || !HasImmersiveDarkMode(window)) {
+        Trace("Idempotent native reinitialization did not preserve dark mode.");
+        shutdownDarkMode();
+        DestroyWindow(window);
+        FreeLibrary(darkModePlugin);
+        return 4;
+    }
+    Trace("Verified idempotent native reinitialization without shutdown.");
     if (!shutdownDarkMode() || !initializeDarkMode()) {
         Trace("Native shutdown and reinitialization did not complete successfully.");
         DestroyWindow(window);
         FreeLibrary(darkModePlugin);
-        return 4;
+        return 5;
     }
     Trace("Verified native shutdown and reinitialization.");
     if (setPreferredAppMode) {
@@ -681,7 +715,7 @@ int wmain(int argumentCount, wchar_t* arguments[]) {
             shutdownDarkMode();
             DestroyWindow(window);
             FreeLibrary(darkModePlugin);
-            return 5;
+            return 6;
         }
         Trace("Verified late initialization restored ForceDark app mode.");
 
@@ -696,7 +730,7 @@ int wmain(int argumentCount, wchar_t* arguments[]) {
             shutdownDarkMode();
             DestroyWindow(window);
             FreeLibrary(darkModePlugin);
-            return 6;
+            return 7;
         }
         Trace("Verified theme-change handling restored ForceDark app mode.");
     }
@@ -706,14 +740,14 @@ int wmain(int argumentCount, wchar_t* arguments[]) {
         shutdownDarkMode();
         DestroyWindow(window);
         FreeLibrary(darkModePlugin);
-        return workerDialogPassed ? 0 : 7;
+        return workerDialogPassed ? 0 : 8;
     }
     if (verifyFileDialog) {
         const bool fileDialogPassed = VerifyFileDialog();
         shutdownDarkMode();
         DestroyWindow(window);
         FreeLibrary(darkModePlugin);
-        return fileDialogPassed ? 0 : 8;
+        return fileDialogPassed ? 0 : 9;
     }
 
     MSG message = {};

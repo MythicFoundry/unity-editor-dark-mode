@@ -30,8 +30,6 @@ namespace MythicFoundry.UnityEditorDarkMode
             _initializationDeadline = EditorApplication.timeSinceStartup + _INITIALIZATION_TIMEOUT_SECONDS;
             EditorApplication.update -= Initialize;
             EditorApplication.update += Initialize;
-            AssemblyReloadEvents.beforeAssemblyReload -= Shutdown;
-            AssemblyReloadEvents.beforeAssemblyReload += Shutdown;
             EditorApplication.quitting -= Shutdown;
             EditorApplication.quitting += Shutdown;
         }

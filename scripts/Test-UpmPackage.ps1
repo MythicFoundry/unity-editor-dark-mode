@@ -52,9 +52,11 @@ if ($bootstrap -cnotmatch '\[InitializeOnLoadMethod\]' -or
     $bootstrap -cnotmatch 'AssetDatabase\.IsAssetImportWorkerProcess\(\)' -or
     $bootstrap -cnotmatch 'EntryPoint\s*=\s*"UnityEditorDarkMode_Initialize"' -or
     $bootstrap -cnotmatch 'EntryPoint\s*=\s*"UnityEditorDarkMode_Shutdown"' -or
-    $bootstrap -cnotmatch 'AssemblyReloadEvents\.beforeAssemblyReload' -or
     $bootstrap -cnotmatch 'EditorApplication\.quitting') {
-    throw 'The managed Editor bootstrap must initialize and shut down the native plug-in outside batch mode and Asset Import Workers.'
+    throw 'The managed Editor bootstrap must initialize outside batch mode and Asset Import Workers and shut down the native plug-in when the Editor quits.'
+}
+if ($bootstrap -cmatch 'AssemblyReloadEvents\.beforeAssemblyReload') {
+    throw 'The managed Editor bootstrap must keep the pinned native plug-in active across managed assembly reloads.'
 }
 
 $assemblyDefinition = Get-Content -LiteralPath $assemblyDefinitionPath -Raw | ConvertFrom-Json

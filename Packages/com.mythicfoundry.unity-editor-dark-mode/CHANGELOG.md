@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.2.0-preview.8
+
+- Keep the pinned native hooks and window subclasses active across managed assembly reloads so Unity's menu bar does not fall back to light Windows painting while managed callbacks run.
+- Continue shutting down native callbacks when the Editor quits, and reinitialize idempotently after each managed reload.
+- Validate reload continuity in the native lifecycle harness and package validator.
+
+## 1.2.0-preview.7
+
+- Keep owner-drawn, image, frame, and other non-text static controls theme-disabled so Unity progress labels cannot inherit a light Explorer surface.
+- Match PowerToys control-theme contracts for checkbox and radio hit testing, custom-painted tab backgrounds, nonstandard buttons, and button control colors.
+- Extend the worker-thread dialog regression harness with progress, owner-drawn static, and per-control theme-state coverage.
+
 ## 1.2.0-preview.6
 
 - Defer all Windows, UxTheme, hook, and subclass work until explicit initialization outside `DllMain`, and add owner-thread shutdown before Unity assembly reload or Editor exit.
