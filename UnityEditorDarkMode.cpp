@@ -149,6 +149,7 @@ typedef struct {
 // global variables
 static thread_local HTHEME g_menuTheme = nullptr;
 static HHOOK g_hook = nullptr;
+static DWORD g_hookThreadId = 0;
 static HWINEVENTHOOK g_windowEventHook = nullptr;
 static HMODULE g_module = nullptr;
 static DWORD g_processId = 0;
@@ -1166,6 +1167,73 @@ static void AttachExistingWindow(HWND hWnd) {
     }
 }
 
+extern "C" BOOL APIENTRY UnityEditorDarkMode_Initialize() {
+    if (!g_module || !g_processId) return FALSE;
+
+    if (!g_applyThemeMessage) {
+        g_applyThemeMessage = RegisterWindowMessageW(L"UnityEditorDarkMode.ApplyTheme");
+    }
+
+    EnableDarkMode(nullptr);
+
+    std::vector<HWND> windowHandles;
+    GetAllWindowsByProcessID(g_processId, windowHandles);
+
+    HWND unityWindow = nullptr;
+    DWORD unityWindowThreadId = 0;
+    for (const HWND& hWnd : windowHandles) {
+        if (IsUnityWndClass(hWnd)) {
+            unityWindow = hWnd;
+            unityWindowThreadId = GetWindowThreadProcessId(hWnd, nullptr);
+        }
+        ThemeWindowOnOwningThread(hWnd);
+    }
+
+    const DWORD targetThreadId = unityWindowThreadId ? unityWindowThreadId : GetCurrentThreadId();
+    if (g_hook && g_hookThreadId != targetThreadId) {
+        UnhookWindowsHookEx(g_hook);
+        g_hook = nullptr;
+        g_hookThreadId = 0;
+    }
+
+    if (!g_hook) {
+        g_hook = SetWindowsHookExW(WH_CBT, CBTProc, nullptr, targetThreadId);
+        if (g_hook) {
+            g_hookThreadId = targetThreadId;
+        }
+    }
+
+    if (!g_windowEventHook) {
+        g_windowEventHook = SetWinEventHook(
+            EVENT_OBJECT_SHOW,
+            EVENT_OBJECT_SHOW,
+            nullptr,
+            WindowEventProc,
+            g_processId,
+            0,
+            WINEVENT_INCONTEXT);
+    }
+
+    BOOL darkModeEnabled = FALSE;
+    HRESULT darkModeResult = unityWindow
+        ? DwmGetWindowAttribute(
+            unityWindow,
+            static_cast<DWMWINDOWATTRIBUTE>(20),
+            &darkModeEnabled,
+            sizeof(darkModeEnabled))
+        : E_HANDLE;
+    if (FAILED(darkModeResult) && unityWindow) {
+        darkModeResult = DwmGetWindowAttribute(
+            unityWindow,
+            static_cast<DWMWINDOWATTRIBUTE>(19),
+            &darkModeEnabled,
+            sizeof(darkModeEnabled));
+    }
+
+    g_ready = SUCCEEDED(darkModeResult) && darkModeEnabled;
+    return g_ready ? TRUE : FALSE;
+}
+
 static BOOL CALLBACK RemoveChildSubclass(HWND hWnd, LPARAM) {
     RemoveWindowSubclass(hWnd, CallWndSubClassProc, 0);
     return TRUE;
@@ -1198,6 +1266,9 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             // the owner before the first stable paint, even while Unity blocks
             // the main thread for managed callbacks or a domain reload.
             g_hook = SetWindowsHookExW(WH_CBT, CBTProc, nullptr, GetCurrentThreadId());
+            if (g_hook) {
+                g_hookThreadId = GetCurrentThreadId();
+            }
             g_windowEventHook = SetWinEventHook(
                 EVENT_OBJECT_SHOW,
                 EVENT_OBJECT_SHOW,
@@ -1220,6 +1291,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             if (g_hook) {
                 UnhookWindowsHookEx(g_hook);
                 g_hook = nullptr;
+                g_hookThreadId = 0;
             }
 
             // When FreeLibrary unloads the plugin before process exit, remove

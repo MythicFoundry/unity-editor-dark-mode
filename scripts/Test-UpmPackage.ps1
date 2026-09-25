@@ -9,6 +9,9 @@ $manifestPath = Join-Path $packageRoot 'package.json'
 $dllPath = Join-Path $packageRoot 'Editor/UnityEditorDarkMode.dll'
 $metaPath = "$dllPath.meta"
 $configPath = "$dllPath.ini"
+$bootstrapPath = Join-Path $packageRoot 'Editor/UnityEditorDarkModeBootstrap.cs'
+$assemblyDefinitionPath = Join-Path $packageRoot 'Editor/MythicFoundry.UnityEditorDarkMode.Editor.asmdef'
+$definitionPath = Join-Path $repoRoot 'UnityEditorDarkMode.def'
 
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 if ($manifest.name -cne 'com.mythicfoundry.unity-editor-dark-mode') {
@@ -21,7 +24,7 @@ if ($ExpectedVersion -and $manifest.version -cne $ExpectedVersion) {
     throw "Package version $($manifest.version) does not match expected $ExpectedVersion."
 }
 
-foreach ($requiredFile in @($dllPath, $metaPath, $configPath, "$configPath.meta", (Join-Path $packageRoot 'LICENSE.md'))) {
+foreach ($requiredFile in @($dllPath, $metaPath, $configPath, "$configPath.meta", $bootstrapPath, "$bootstrapPath.meta", $assemblyDefinitionPath, "$assemblyDefinitionPath.meta", (Join-Path $packageRoot 'LICENSE.md'))) {
     if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {
         throw "Required package file missing: $requiredFile"
     }
@@ -37,10 +40,30 @@ foreach ($asset in (Get-ChildItem -LiteralPath $packageRoot -Recurse -File | Whe
 }
 
 $meta = Get-Content -LiteralPath $metaPath -Raw
-if ($meta -cnotmatch '(?m)^  isPreloaded: 1\r?$' -or
+if ($meta -cnotmatch '(?m)^  isPreloaded: 0\r?$' -or
     $meta -cnotmatch '(?ms)Editor: Editor\s+second:\s+enabled: 1\s+settings:\s+CPU: AnyCPU\s+DefaultValueInitialized: true\s+OS: Windows' -or
     $meta -cnotmatch '(?ms)Standalone: Win64\s+second:\s+enabled: 0') {
-    throw 'The native plug-in importer must preload only in the Windows Editor.'
+    throw 'The native plug-in importer must be non-preloaded and enabled only in the Windows Editor.'
+}
+
+$bootstrap = Get-Content -LiteralPath $bootstrapPath -Raw
+if ($bootstrap -cnotmatch '\[InitializeOnLoadMethod\]' -or
+    $bootstrap -cnotmatch 'AssetDatabase\.IsAssetImportWorkerProcess\(\)' -or
+    $bootstrap -cnotmatch 'EntryPoint\s*=\s*"UnityEditorDarkMode_Initialize"') {
+    throw 'The managed Editor bootstrap must initialize the native plug-in outside batch mode and Asset Import Workers.'
+}
+
+$assemblyDefinition = Get-Content -LiteralPath $assemblyDefinitionPath -Raw | ConvertFrom-Json
+if ($assemblyDefinition.name -cne 'MythicFoundry.UnityEditorDarkMode.Editor' -or
+    $assemblyDefinition.rootNamespace -cne 'MythicFoundry.UnityEditorDarkMode' -or
+    @($assemblyDefinition.includePlatforms).Count -ne 1 -or
+    $assemblyDefinition.includePlatforms[0] -cne 'Editor') {
+    throw 'The managed bootstrap assembly must be Editor-only and use the MythicFoundry.UnityEditorDarkMode root namespace.'
+}
+
+$definition = Get-Content -LiteralPath $definitionPath -Raw
+if ($definition -cnotmatch '(?m)^\s*UnityEditorDarkMode_Initialize(?:\s+@\d+)?\s*\r?$') {
+    throw 'The native module definition must export UnityEditorDarkMode_Initialize.'
 }
 
 $stream = [System.IO.File]::OpenRead($dllPath)
@@ -59,6 +82,18 @@ try {
 }
 finally {
     $stream.Dispose()
+}
+
+$module = [System.Runtime.InteropServices.NativeLibrary]::Load($dllPath)
+try {
+    $initializeExport = [IntPtr]::Zero
+    if (-not [System.Runtime.InteropServices.NativeLibrary]::TryGetExport($module, 'UnityEditorDarkMode_Initialize', [ref]$initializeExport) -or
+        $initializeExport -eq [IntPtr]::Zero) {
+        throw 'The packaged DLL does not export UnityEditorDarkMode_Initialize.'
+    }
+}
+finally {
+    [System.Runtime.InteropServices.NativeLibrary]::Free($module)
 }
 
 Write-Output "UPM package $($manifest.name) $($manifest.version) is valid."

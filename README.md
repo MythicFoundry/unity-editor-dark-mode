@@ -20,10 +20,10 @@ A fully working runtime dark mode mod for Unity Editor on Windows with:
 The Windows Editor plug-in is available as `com.mythicfoundry.unity-editor-dark-mode` from a version tag in this repository. After the corresponding tag has been published, add this entry to your Unity project's `Packages/manifest.json` dependencies:
 
 ```json
-"com.mythicfoundry.unity-editor-dark-mode": "https://github.com/MythicFoundry/unity-editor-dark-mode.git?path=/Packages/com.mythicfoundry.unity-editor-dark-mode#v1.2.0-preview.1"
+"com.mythicfoundry.unity-editor-dark-mode": "https://github.com/MythicFoundry/unity-editor-dark-mode.git?path=/Packages/com.mythicfoundry.unity-editor-dark-mode#v1.2.0-preview.2"
 ```
 
-The package includes the native DLL and its importer settings, configured to preload in the Windows Editor only. Remove any existing `UnityEditorDarkMode.dll` under `Assets/Plugins` before installing the package; loading both copies is unsupported. Restart Unity yourself after installation or an update so the preloaded DLL can take effect.
+The package includes the native DLL, Windows Editor-only importer settings, and a managed bootstrap that loads and initializes the DLL after Package Manager registration on Unity's main Editor thread. Remove any existing `UnityEditorDarkMode.dll` under `Assets/Plugins` before installing the package; loading both copies is unsupported. Restart Unity when upgrading from an earlier preloaded package version so Windows can unload the old native module.
 
 Git dependencies contain files committed at the tag. A DLL uploaded as a GitHub Release asset alone is not included in the Unity package dependency.
 
@@ -131,7 +131,7 @@ Remove the DLL from your project and restart Unity Editor (You need to close the
 3. Commit the source and staged package together. Push the commit and wait for CI to pass.
 4. Create and push a tag named `v<package-version>` on that commit. The tag workflow validates that the tag matches `package.json`, checks that the native source builds, and publishes a GitHub Release with the packaged DLL attached. Unity fetches the DLL from the tagged repository contents, not from the release attachment.
 
-Do not tag a version until its native UI behavior has been visually checked in Unity. Updating or testing a preloaded DLL requires a Unity restart; obtain permission before restarting someone else's Editor session.
+Do not tag a version until its native UI behavior has been visually checked in Unity. Upgrading from a preloaded package version requires a Unity restart; obtain permission before restarting someone else's Editor session.
 
 ## How it works?
 This project is basically a stripped down version of [ReaperThemeHackDll](https://github.com/jjYBdx4IL/ReaperThemeHackDll) made by [jjYBdx4IL](https://github.com/jjYBdx4IL) with some minor modifications. If you like this project, please consider giving a star to the `ReaperThemeHackDll` project as well. Actually, his code with some minor modifications can be used to theme any legacy Windows applications that uses the Win32 title bar, menu bar, context menu, etc.

@@ -7,7 +7,7 @@
 #pragma comment(lib, "comctl32.lib")
 
 namespace {
-constexpr wchar_t kWindowClass[] = L"UnityEditorDarkModeDialogHarness";
+constexpr wchar_t kWindowClass[] = L"UnityContainerWndClass";
 constexpr int kCloseButtonId = 1001;
 
 void Trace(const char* message) {
@@ -84,6 +84,14 @@ int wmain() {
         return 1;
     }
     Trace("Loaded plugin.");
+    using InitializeDarkMode = BOOL(APIENTRY*)();
+    const auto initializeDarkMode = reinterpret_cast<InitializeDarkMode>(
+        GetProcAddress(darkModePlugin, "UnityEditorDarkMode_Initialize"));
+    if (!initializeDarkMode) {
+        std::fprintf(stderr, "Could not find UnityEditorDarkMode_Initialize (Win32 error %lu).\n", GetLastError());
+        FreeLibrary(darkModePlugin);
+        return 2;
+    }
 
     {
         HMODULE uxtheme = GetModuleHandleW(L"uxtheme.dll");
@@ -184,6 +192,13 @@ int wmain() {
     ShowWindow(window, SW_SHOW);
     Trace("Showed harness window.");
     UpdateWindow(window);
+    if (!initializeDarkMode()) {
+        Trace("UnityEditorDarkMode_Initialize could not attach to the harness window.");
+        DestroyWindow(window);
+        FreeLibrary(darkModePlugin);
+        return 3;
+    }
+    Trace("Initialized plugin after creating the harness window.");
 
     MSG message = {};
     while (GetMessageW(&message, nullptr, 0, 0) > 0) {
