@@ -1,6 +1,6 @@
 {
   "name": "com.mythicfoundry.unity-editor-dark-mode",
-  "version": "1.2.0-preview.4",
+  "version": "1.2.0-preview.6",
   "displayName": "Unity Editor Dark Mode",
   "description": "Windows-only native dark-mode plug-in for the Unity Editor.",
   "author": {

@@ -20,10 +20,10 @@ A fully working runtime dark mode mod for Unity Editor on Windows with:
 The Windows Editor plug-in is available as `com.mythicfoundry.unity-editor-dark-mode` from a version tag in this repository. After the corresponding tag has been published, add this entry to your Unity project's `Packages/manifest.json` dependencies:
 
 ```json
-"com.mythicfoundry.unity-editor-dark-mode": "https://github.com/MythicFoundry/unity-editor-dark-mode.git?path=/Packages/com.mythicfoundry.unity-editor-dark-mode#v1.2.0-preview.4"
+"com.mythicfoundry.unity-editor-dark-mode": "https://github.com/MythicFoundry/unity-editor-dark-mode.git?path=/Packages/com.mythicfoundry.unity-editor-dark-mode#v1.2.0-preview.6"
 ```
 
-The package includes the native DLL, Windows Editor-only importer settings, and a managed bootstrap that loads and initializes the DLL after Package Manager registration on Unity's main Editor thread. Remove any existing `UnityEditorDarkMode.dll` under `Assets/Plugins` before installing the package; loading both copies is unsupported. Restart Unity when upgrading from an earlier preloaded package version so Windows can unload the old native module.
+The package includes the native DLL, Windows Editor-only importer settings, and a managed bootstrap that loads and initializes the DLL after Package Manager registration on Unity's main Editor thread. Remove any existing `UnityEditorDarkMode.dll` under `Assets/Plugins` before installing the package; loading both copies is unsupported. Restart Unity after upgrading because the initialized native module stays pinned for callback safety until the Editor process exits.
 
 Git dependencies contain files committed at the tag. A DLL uploaded as a GitHub Release asset alone is not included in the Unity package dependency.
 
@@ -50,15 +50,8 @@ Git dependencies contain files committed at the tag. A DLL uploaded as a GitHub 
 - Now enjoy the immersive dark mode in Unity Editor!
 
 ## What if you don't want to add the DLL to your project?
-There are few options:
-- You could inject the DLL into the Unity Editor process yourself using your preferred approach.
-- Use `withdll.exe` from [Detours](https://github.com/microsoft/Detours). Create a batch script or PowerShell script to run the Unity Editor with the DLL attached like below:
-    ```cmd
-    .\withdll.exe /d:UnityEditorDarkMode.dll ^
-    "C:\Program Files\Unity\Hub\Editor\2022.3.22f1\Editor\Unity.exe" ^
-    -projectPath "C:\<Path>\<To>\<Your>\<UnityProjectFolder>"
-    ```
-- Put the DLL outside of your project and add a Unity Editor script to your project like below:
+Put the DLL outside of your project and add a Unity Editor script to your project like below. Injection tools that only load the DLL are not sufficient because loader-lock-safe startup requires an explicit call to `UnityEditorDarkMode_Initialize`.
+
     ```C#
     #if UNITY_EDITOR_WIN // Windows only, obviously
     namespace Editor.Theme // Change this to your own namespace you like or simply remove it
@@ -69,8 +62,9 @@ There are few options:
         public static class UnityEditorDarkMode
         {
             // Change below path to the path of the downloaded dll
-            [DllImport(@"C:\Users\<...>\Desktop\UnityEditorDarkMode.dll", EntryPoint = "DllMain")]
-            private static extern void _();
+            [DllImport(@"C:\Users\<...>\Desktop\UnityEditorDarkMode.dll", EntryPoint = "UnityEditorDarkMode_Initialize")]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            private static extern bool _();
 
             [InitializeOnLoadMethod]
             private static void __()
@@ -151,17 +145,7 @@ Ok, so what I have done on top of `ReaperThemeHackDll` is:
   > **NOTE:** If you do this, it basically means this hack can be used for any Windows application that uses the default white Win32 title bar, menu bar, context menu, etc.
 - A different color preset is given by default which I think looks better with Unity Editor.
 - Some inrelevent code is also removed and some minor modifications are made to make it more performant and clean. You don't have to do it tho so I am not going to explain them here.
-- The built dll is a standard Win32 DLL with a DllMain entry point, meaning it can be side-loaded using Detours `withdll.exe`. This has been explained in the ReaperThemeHackDll repository as well. However, one caveat is that if you run below command:
-    ```cmd
-    .\withdll.exe /d:UnityEditorDarkMode.dll ^
-    "C:\Program Files\Unity\Hub\Editor\2022.3.22f1\Editor\Unity.exe"
-    ```
-    It will NOT work because invoking Unity.exe directly will launch the Unity Hub first. After you open the project from Unity Hub, it will launch the Unity Editor. But the context is getting lost from here. So instead of running above command, you should always give your project path as an argument to Unity.exe like below if you wish to use `withdll.exe` instead of the editor script approach:
-    ```cmd
-    .\withdll.exe /d:UnityEditorDarkMode.dll ^
-    "C:\Program Files\Unity\Hub\Editor\2022.3.22f1\Editor\Unity.exe" ^
-    -projectPath "C:\<Path>\<To>\<Your>\<UnityProjectFolder>"
-    ```
+- Keep `DllMain` limited to recording the module handle and disabling thread callbacks. The managed bootstrap calls explicit initialize and shutdown exports outside the Windows loader lock, and initialization pins the native module so callbacks can never target unloaded code.
 
 ## Known issues
 - The DLL can theme native windows and controls hosted by `Unity.exe`. It cannot theme Unity Hub, crash handlers, browsers, version-control clients, or other external processes.

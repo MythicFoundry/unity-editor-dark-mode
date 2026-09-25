@@ -2,3 +2,4 @@ LIBRARY UnityEditorDarkMode
 EXPORTS
    DllMain @1
    UnityEditorDarkMode_Initialize @2
+   UnityEditorDarkMode_Shutdown @3

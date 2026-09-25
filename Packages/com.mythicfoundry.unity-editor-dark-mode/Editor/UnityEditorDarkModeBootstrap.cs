@@ -12,10 +12,15 @@ namespace MythicFoundry.UnityEditorDarkMode
         private const double _INITIALIZATION_TIMEOUT_SECONDS = 10.0;
 
         private static double _initializationDeadline;
+        private static bool _nativeInitialized;
 
         [DllImport(_LIBRARY_NAME, CallingConvention = CallingConvention.Winapi, EntryPoint = "UnityEditorDarkMode_Initialize")]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool InitializeNative();
+
+        [DllImport(_LIBRARY_NAME, CallingConvention = CallingConvention.Winapi, EntryPoint = "UnityEditorDarkMode_Shutdown")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool ShutdownNative();
 
         [InitializeOnLoadMethod]
         private static void QueueInitialization()
@@ -25,6 +30,10 @@ namespace MythicFoundry.UnityEditorDarkMode
             _initializationDeadline = EditorApplication.timeSinceStartup + _INITIALIZATION_TIMEOUT_SECONDS;
             EditorApplication.update -= Initialize;
             EditorApplication.update += Initialize;
+            AssemblyReloadEvents.beforeAssemblyReload -= Shutdown;
+            AssemblyReloadEvents.beforeAssemblyReload += Shutdown;
+            EditorApplication.quitting -= Shutdown;
+            EditorApplication.quitting += Shutdown;
         }
 
         private static void Initialize()
@@ -33,6 +42,7 @@ namespace MythicFoundry.UnityEditorDarkMode
             {
                 if (InitializeNative())
                 {
+                    _nativeInitialized = true;
                     EditorApplication.update -= Initialize;
                     return;
                 }
@@ -54,6 +64,29 @@ namespace MythicFoundry.UnityEditorDarkMode
 
             EditorApplication.update -= Initialize;
             Debug.LogError("Unity Editor Dark Mode could not attach to the Unity main window within 10 seconds.");
+        }
+
+        private static void Shutdown()
+        {
+            EditorApplication.update -= Initialize;
+            if (!_nativeInitialized) return;
+
+            _nativeInitialized = false;
+            try
+            {
+                if (!ShutdownNative())
+                {
+                    Debug.LogError("Unity Editor Dark Mode could not release its native window hooks.");
+                }
+            }
+            catch (DllNotFoundException exception)
+            {
+                Debug.LogException(exception);
+            }
+            catch (EntryPointNotFoundException exception)
+            {
+                Debug.LogException(exception);
+            }
         }
     }
 }

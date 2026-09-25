@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.2.0-preview.6
+
+- Defer all Windows, UxTheme, hook, and subclass work until explicit initialization outside `DllMain`, and add owner-thread shutdown before Unity assembly reload or Editor exit.
+- Refresh immersive color policy and cached menu themes when Windows theme settings change.
+- Add dark painting for checkboxes, radio buttons, group boxes, trackbars, hotkey controls, and text labels.
+- Theme unrecognized descendants only inside verified Windows common file dialogs so new shell-host classes inherit dark Explorer styling without affecting Unity custom-drawn controls.
+
+## 1.2.0-preview.5
+
+- Theme the complete in-process Windows common file-dialog navigation hierarchy, including its `WorkerW` background host.
+- Apply common-dialog edit styling and item-view selection styling without replacing the Explorer-themed shell chrome.
+- Add an automated `IFileDialog` shell-hierarchy regression harness.
+
 ## 1.2.0-preview.4
 
 - Register the process-wide in-context WinEvent callback from its native module so Unity dialogs created on auxiliary UI threads receive dark title-bar and control styling.

@@ -4,9 +4,13 @@
 #include <windows.h>
 #include <commctrl.h>
 #include <dwmapi.h>
+#include <shobjidl.h>
+#include <uxtheme.h>
 
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "dwmapi.lib")
+#pragma comment(lib, "ole32.lib")
+#pragma comment(lib, "uxtheme.lib")
 
 namespace {
 constexpr wchar_t kWindowClass[] = L"UnityContainerWndClass";
@@ -16,13 +20,32 @@ constexpr int kWorkerProgressId = 1003;
 constexpr int kForceDarkAppMode = 2;
 constexpr int kForceLightAppMode = 3;
 constexpr wchar_t kWorkerDialogFlag[] = L"--verify-worker-dialog";
+constexpr wchar_t kFileDialogFlag[] = L"--verify-file-dialog";
+constexpr wchar_t kFileDialogTitle[] = L"Unity Editor Dark Mode - IFileDialog Harness";
 
 struct WorkerDialogState {
     HWND owner = nullptr;
     HWND button = nullptr;
+    HWND checkbox = nullptr;
+    HWND radio = nullptr;
+    HWND groupBox = nullptr;
+    HWND trackbar = nullptr;
+    HWND hotkey = nullptr;
+    HWND staticText = nullptr;
     int attempts = 0;
     bool passed = false;
     DWORD errorCode = ERROR_SUCCESS;
+};
+
+struct FileDialogState {
+    HRESULT showResult = E_UNEXPECTED;
+    bool passed = false;
+};
+
+struct WindowSearchState {
+    const wchar_t* className = nullptr;
+    const wchar_t* title = nullptr;
+    HWND result = nullptr;
 };
 
 using SetPreferredAppMode = int(WINAPI*)(int);
@@ -102,6 +125,170 @@ bool HasImmersiveDarkMode(HWND window) {
     return SUCCEEDED(result) && darkModeEnabled;
 }
 
+BOOL CALLBACK FindWindowCallback(HWND window, LPARAM parameter) {
+    WindowSearchState* state = reinterpret_cast<WindowSearchState*>(parameter);
+    if (state->className) {
+        wchar_t className[256] = {};
+        GetClassNameW(window, className, static_cast<int>(_countof(className)));
+        if (_wcsicmp(className, state->className) != 0) return TRUE;
+    }
+    if (state->title) {
+        wchar_t title[512] = {};
+        GetWindowTextW(window, title, static_cast<int>(_countof(title)));
+        if (wcscmp(title, state->title) != 0) return TRUE;
+    }
+
+    state->result = window;
+    return FALSE;
+}
+
+HWND FindThreadWindow(DWORD threadId, const wchar_t* className, const wchar_t* title) {
+    WindowSearchState state = { className, title, nullptr };
+    EnumThreadWindows(threadId, FindWindowCallback, reinterpret_cast<LPARAM>(&state));
+    return state.result;
+}
+
+HWND FindDescendantWindow(HWND root, const wchar_t* className) {
+    WindowSearchState state = { className, nullptr, nullptr };
+    EnumChildWindows(root, FindWindowCallback, reinterpret_cast<LPARAM>(&state));
+    return state.result;
+}
+
+bool PaintsDarkBackground(HWND window) {
+    BITMAPINFO bitmapInfo = {};
+    bitmapInfo.bmiHeader.biSize = sizeof(bitmapInfo.bmiHeader);
+    bitmapInfo.bmiHeader.biWidth = 1;
+    bitmapInfo.bmiHeader.biHeight = -1;
+    bitmapInfo.bmiHeader.biPlanes = 1;
+    bitmapInfo.bmiHeader.biBitCount = 32;
+    bitmapInfo.bmiHeader.biCompression = BI_RGB;
+
+    void* pixelData = nullptr;
+    HDC deviceContext = CreateCompatibleDC(nullptr);
+    HBITMAP bitmap = CreateDIBSection(
+        deviceContext,
+        &bitmapInfo,
+        DIB_RGB_COLORS,
+        &pixelData,
+        nullptr,
+        0);
+    if (!deviceContext || !bitmap || !pixelData) {
+        if (bitmap) DeleteObject(bitmap);
+        if (deviceContext) DeleteDC(deviceContext);
+        return false;
+    }
+
+    HGDIOBJ oldBitmap = SelectObject(deviceContext, bitmap);
+    *static_cast<DWORD*>(pixelData) = RGB(255, 255, 255);
+    DWORD_PTR eraseResult = 0;
+    const LRESULT sent = SendMessageTimeoutW(
+        window,
+        WM_ERASEBKGND,
+        reinterpret_cast<WPARAM>(deviceContext),
+        0,
+        SMTO_ABORTIFHUNG,
+        1000,
+        &eraseResult);
+    const COLORREF color = GetPixel(deviceContext, 0, 0);
+
+    SelectObject(deviceContext, oldBitmap);
+    DeleteObject(bitmap);
+    DeleteDC(deviceContext);
+
+    return sent && eraseResult &&
+        GetRValue(color) < 128 &&
+        GetGValue(color) < 128 &&
+        GetBValue(color) < 128;
+}
+
+bool PaintsDarkClient(HWND window) {
+    BITMAPINFO bitmapInfo = {};
+    bitmapInfo.bmiHeader.biSize = sizeof(bitmapInfo.bmiHeader);
+    bitmapInfo.bmiHeader.biWidth = 1;
+    bitmapInfo.bmiHeader.biHeight = -1;
+    bitmapInfo.bmiHeader.biPlanes = 1;
+    bitmapInfo.bmiHeader.biBitCount = 32;
+    bitmapInfo.bmiHeader.biCompression = BI_RGB;
+
+    void* pixelData = nullptr;
+    HDC deviceContext = CreateCompatibleDC(nullptr);
+    HBITMAP bitmap = CreateDIBSection(
+        deviceContext,
+        &bitmapInfo,
+        DIB_RGB_COLORS,
+        &pixelData,
+        nullptr,
+        0);
+    if (!deviceContext || !bitmap || !pixelData) {
+        if (bitmap) DeleteObject(bitmap);
+        if (deviceContext) DeleteDC(deviceContext);
+        return false;
+    }
+
+    HGDIOBJ oldBitmap = SelectObject(deviceContext, bitmap);
+    *static_cast<DWORD*>(pixelData) = RGB(255, 255, 255);
+    DWORD_PTR paintResult = 0;
+    const LRESULT sent = SendMessageTimeoutW(
+        window,
+        WM_PRINTCLIENT,
+        reinterpret_cast<WPARAM>(deviceContext),
+        PRF_CLIENT,
+        SMTO_ABORTIFHUNG,
+        1000,
+        &paintResult);
+    const COLORREF color = GetPixel(deviceContext, 0, 0);
+
+    SelectObject(deviceContext, oldBitmap);
+    DeleteObject(bitmap);
+    DeleteDC(deviceContext);
+
+    return sent &&
+        GetRValue(color) < 128 &&
+        GetGValue(color) < 128 &&
+        GetBValue(color) < 128;
+}
+
+bool IsFileDialogThemed(HWND dialog) {
+    HWND worker = FindDescendantWindow(dialog, L"WorkerW");
+    HWND navigationBand = FindDescendantWindow(dialog, L"ReBarWindow32");
+    HWND shellView = FindDescendantWindow(dialog, L"SHELLDLL_DefView");
+    HWND itemsView = shellView
+        ? FindDescendantWindow(shellView, L"DirectUIHWND")
+        : nullptr;
+    HWND edit = FindDescendantWindow(dialog, L"Edit");
+    return HasImmersiveDarkMode(dialog) &&
+        worker &&
+        navigationBand &&
+        shellView &&
+        itemsView &&
+        edit &&
+        GetWindowTheme(navigationBand) &&
+        GetWindowTheme(edit) &&
+        PaintsDarkBackground(worker);
+}
+
+void ReportFileDialogThemeState(HWND dialog) {
+    HWND worker = FindDescendantWindow(dialog, L"WorkerW");
+    HWND navigationBand = FindDescendantWindow(dialog, L"ReBarWindow32");
+    HWND shellView = FindDescendantWindow(dialog, L"SHELLDLL_DefView");
+    HWND itemsView = shellView
+        ? FindDescendantWindow(shellView, L"DirectUIHWND")
+        : nullptr;
+    HWND edit = FindDescendantWindow(dialog, L"Edit");
+    std::fprintf(
+        stderr,
+        "IFileDialog state: title=%d WorkerW=%d nav=%d nav-theme=%d shell=%d items=%d edit=%d edit-theme=%d WorkerW-dark=%d.\n",
+        HasImmersiveDarkMode(dialog),
+        worker != nullptr,
+        navigationBand != nullptr,
+        navigationBand && GetWindowTheme(navigationBand),
+        shellView != nullptr,
+        itemsView != nullptr,
+        edit != nullptr,
+        edit && GetWindowTheme(edit),
+        worker && PaintsDarkBackground(worker));
+}
+
 INT_PTR CALLBACK WorkerDialogProc(HWND dialog, UINT message, WPARAM, LPARAM lParam) {
     WorkerDialogState* state = reinterpret_cast<WorkerDialogState*>(
         GetWindowLongPtrW(dialog, DWLP_USER));
@@ -116,7 +303,7 @@ INT_PTR CALLBACK WorkerDialogProc(HWND dialog, UINT message, WPARAM, LPARAM lPar
                 -32000,
                 -32000,
                 440,
-                150,
+                280,
                 SWP_NOACTIVATE | SWP_NOZORDER);
             AddControl(dialog, L"Static", L"Building Player", SS_LEFT, 18, 18, 260, 22);
             AddControl(
@@ -139,6 +326,16 @@ INT_PTR CALLBACK WorkerDialogProc(HWND dialog, UINT message, WPARAM, LPARAM lPar
                 100,
                 30,
                 kWorkerButtonId);
+            state->staticText = AddControl(dialog, L"Static", L"Native controls", SS_LEFT, 18, 126, 150, 22);
+            state->checkbox = AddControl(dialog, L"Button", L"Checkbox", BS_AUTOCHECKBOX, 18, 154, 120, 24);
+            state->radio = AddControl(dialog, L"Button", L"Radio", BS_AUTORADIOBUTTON, 150, 154, 100, 24);
+            state->groupBox = AddControl(dialog, L"Button", L"Group", BS_GROUPBOX, 265, 132, 150, 58);
+            state->trackbar = AddControl(dialog, TRACKBAR_CLASSW, L"", TBS_AUTOTICKS, 18, 196, 230, 34);
+            SendMessageW(state->trackbar, TBM_SETRANGE, TRUE, MAKELPARAM(0, 100));
+            SendMessageW(state->trackbar, TBM_SETPOS, TRUE, 60);
+            state->hotkey = AddControl(dialog, HOTKEY_CLASSW, L"", WS_BORDER, 265, 202, 150, 28);
+            SendMessageW(state->hotkey, HKM_SETHOTKEY, MAKEWORD('K', HOTKEYF_CONTROL | HOTKEYF_SHIFT), 0);
+            ApplyDefaultFont(dialog);
             SetTimer(dialog, 1, 20, nullptr);
             return TRUE;
         }
@@ -148,7 +345,13 @@ INT_PTR CALLBACK WorkerDialogProc(HWND dialog, UINT message, WPARAM, LPARAM lPar
 
             const LONG_PTR buttonStyle = GetWindowLongPtrW(state->button, GWL_STYLE);
             state->passed = HasImmersiveDarkMode(dialog) &&
-                (buttonStyle & BS_TYPEMASK) == BS_OWNERDRAW;
+                (buttonStyle & BS_TYPEMASK) == BS_OWNERDRAW &&
+                PaintsDarkClient(state->staticText) &&
+                PaintsDarkClient(state->checkbox) &&
+                PaintsDarkClient(state->radio) &&
+                PaintsDarkClient(state->groupBox) &&
+                PaintsDarkClient(state->trackbar) &&
+                PaintsDarkClient(state->hotkey);
             ++state->attempts;
             if (state->passed || state->attempts >= 100) {
                 KillTimer(dialog, 1);
@@ -173,7 +376,7 @@ DWORD WINAPI WorkerDialogThread(void* parameter) {
     dialogTemplate.dialog.dwExtendedStyle = WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
     dialogTemplate.dialog.cdit = 0;
     dialogTemplate.dialog.cx = 220;
-    dialogTemplate.dialog.cy = 75;
+    dialogTemplate.dialog.cy = 140;
 
     const INT_PTR result = DialogBoxIndirectParamW(
         GetModuleHandleW(nullptr),
@@ -229,13 +432,96 @@ bool VerifyWorkerThreadDialog(HWND owner) {
     Trace("Verified worker-thread #32770 dialog dark title bar and child control theming.");
     return true;
 }
+
+DWORD WINAPI FileDialogThread(void* parameter) {
+    FileDialogState* state = static_cast<FileDialogState*>(parameter);
+    const HRESULT initializeResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    if (FAILED(initializeResult)) {
+        state->showResult = initializeResult;
+        return 1;
+    }
+
+    IFileOpenDialog* dialog = nullptr;
+    HRESULT result = CoCreateInstance(
+        CLSID_FileOpenDialog,
+        nullptr,
+        CLSCTX_INPROC_SERVER,
+        IID_PPV_ARGS(&dialog));
+    if (SUCCEEDED(result)) {
+        FILEOPENDIALOGOPTIONS options = {};
+        result = dialog->GetOptions(&options);
+        if (SUCCEEDED(result)) {
+            result = dialog->SetOptions(
+                options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_NOCHANGEDIR);
+        }
+        if (SUCCEEDED(result)) result = dialog->SetTitle(kFileDialogTitle);
+        if (SUCCEEDED(result)) result = dialog->Show(nullptr);
+        dialog->Release();
+    }
+
+    state->showResult = result;
+    CoUninitialize();
+    return 0;
+}
+
+bool VerifyFileDialog() {
+    FileDialogState state = {};
+    DWORD threadId = 0;
+    HANDLE thread = CreateThread(nullptr, 0, FileDialogThread, &state, 0, &threadId);
+    if (!thread) {
+        std::fprintf(stderr, "Could not create IFileDialog thread (Win32 error %lu).\n", GetLastError());
+        return false;
+    }
+
+    HWND dialog = nullptr;
+    for (int attempt = 0; attempt < 250 && !state.passed; ++attempt) {
+        if (WaitForSingleObject(thread, 20) == WAIT_OBJECT_0) break;
+        dialog = FindThreadWindow(threadId, L"#32770", nullptr);
+        if (!dialog) continue;
+
+        SetWindowPos(
+            dialog,
+            nullptr,
+            -32000,
+            -32000,
+            0,
+            0,
+            SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER);
+        state.passed = IsFileDialogThemed(dialog);
+    }
+
+    if (dialog) {
+        if (!state.passed) ReportFileDialogThemeState(dialog);
+        PostMessageW(dialog, WM_COMMAND, IDCANCEL, 0);
+        PostMessageW(dialog, WM_CLOSE, 0, 0);
+    }
+
+    const DWORD waitResult = WaitForSingleObject(thread, 5000);
+
+    DWORD exitCode = 0;
+    GetExitCodeThread(thread, &exitCode);
+    CloseHandle(thread);
+    if (!state.passed || waitResult != WAIT_OBJECT_0 || exitCode != 0) {
+        std::fprintf(
+            stderr,
+            "IFileDialog shell hierarchy was not fully themed (thread result %lu, Show result 0x%08lX).\n",
+            exitCode,
+            static_cast<unsigned long>(state.showResult));
+        return false;
+    }
+
+    Trace("Verified IFileDialog title bar, shell hierarchy, item view, edit surface, and WorkerW background.");
+    return true;
+}
 }
 
 int wmain(int argumentCount, wchar_t* arguments[]) {
     Trace("Starting harness.");
     const bool verifyWorkerDialog = argumentCount == 2 &&
         wcscmp(arguments[1], kWorkerDialogFlag) == 0;
-    if (argumentCount > 1 && !verifyWorkerDialog) {
+    const bool verifyFileDialog = argumentCount == 2 &&
+        wcscmp(arguments[1], kFileDialogFlag) == 0;
+    if (argumentCount > 1 && !verifyWorkerDialog && !verifyFileDialog) {
         std::fprintf(stderr, "Unknown harness argument.\n");
         return 1;
     }
@@ -243,7 +529,8 @@ int wmain(int argumentCount, wchar_t* arguments[]) {
     const HINSTANCE instance = GetModuleHandleW(nullptr);
     INITCOMMONCONTROLSEX commonControls = {
         sizeof(commonControls),
-        ICC_PROGRESS_CLASS | ICC_TREEVIEW_CLASSES | ICC_TAB_CLASSES | ICC_LISTVIEW_CLASSES
+        ICC_PROGRESS_CLASS | ICC_TREEVIEW_CLASSES | ICC_TAB_CLASSES | ICC_LISTVIEW_CLASSES |
+            ICC_BAR_CLASSES | ICC_WIN95_CLASSES
     };
     InitCommonControlsEx(&commonControls);
 
@@ -256,8 +543,11 @@ int wmain(int argumentCount, wchar_t* arguments[]) {
     using InitializeDarkMode = BOOL(APIENTRY*)();
     const auto initializeDarkMode = reinterpret_cast<InitializeDarkMode>(
         GetProcAddress(darkModePlugin, "UnityEditorDarkMode_Initialize"));
-    if (!initializeDarkMode) {
-        std::fprintf(stderr, "Could not find UnityEditorDarkMode_Initialize (Win32 error %lu).\n", GetLastError());
+    using ShutdownDarkMode = BOOL(APIENTRY*)();
+    const auto shutdownDarkMode = reinterpret_cast<ShutdownDarkMode>(
+        GetProcAddress(darkModePlugin, "UnityEditorDarkMode_Shutdown"));
+    if (!initializeDarkMode || !shutdownDarkMode) {
+        std::fprintf(stderr, "Could not find the UnityEditorDarkMode lifecycle exports (Win32 error %lu).\n", GetLastError());
         FreeLibrary(darkModePlugin);
         return 2;
     }
@@ -362,7 +652,7 @@ int wmain(int argumentCount, wchar_t* arguments[]) {
 
     ApplyDefaultFont(window);
     Trace("Applied fonts.");
-    if (!verifyWorkerDialog) {
+    if (!verifyWorkerDialog && !verifyFileDialog) {
         ShowWindow(window, SW_SHOW);
         Trace("Showed harness window.");
         UpdateWindow(window);
@@ -374,6 +664,13 @@ int wmain(int argumentCount, wchar_t* arguments[]) {
         return 3;
     }
     Trace("Initialized plugin after creating the harness window.");
+    if (!shutdownDarkMode() || !initializeDarkMode()) {
+        Trace("Native shutdown and reinitialization did not complete successfully.");
+        DestroyWindow(window);
+        FreeLibrary(darkModePlugin);
+        return 4;
+    }
+    Trace("Verified native shutdown and reinitialization.");
     if (setPreferredAppMode) {
         const int previousAppMode = setPreferredAppMode(kForceDarkAppMode);
         if (previousAppMode != kForceDarkAppMode) {
@@ -381,18 +678,42 @@ int wmain(int argumentCount, wchar_t* arguments[]) {
                 stderr,
                 "Late initialization did not restore ForceDark app mode (previous mode %d).\n",
                 previousAppMode);
+            shutdownDarkMode();
             DestroyWindow(window);
             FreeLibrary(darkModePlugin);
-            return 4;
+            return 5;
         }
         Trace("Verified late initialization restored ForceDark app mode.");
+
+        setPreferredAppMode(kForceLightAppMode);
+        SendMessageW(window, WM_SETTINGCHANGE, 0, 0);
+        const int previousThemeChangeMode = setPreferredAppMode(kForceDarkAppMode);
+        if (previousThemeChangeMode != kForceDarkAppMode) {
+            std::fprintf(
+                stderr,
+                "Theme-change handling did not restore ForceDark app mode (previous mode %d).\n",
+                previousThemeChangeMode);
+            shutdownDarkMode();
+            DestroyWindow(window);
+            FreeLibrary(darkModePlugin);
+            return 6;
+        }
+        Trace("Verified theme-change handling restored ForceDark app mode.");
     }
 
     if (verifyWorkerDialog) {
         const bool workerDialogPassed = VerifyWorkerThreadDialog(window);
+        shutdownDarkMode();
         DestroyWindow(window);
         FreeLibrary(darkModePlugin);
-        return workerDialogPassed ? 0 : 5;
+        return workerDialogPassed ? 0 : 7;
+    }
+    if (verifyFileDialog) {
+        const bool fileDialogPassed = VerifyFileDialog();
+        shutdownDarkMode();
+        DestroyWindow(window);
+        FreeLibrary(darkModePlugin);
+        return fileDialogPassed ? 0 : 8;
     }
 
     MSG message = {};
@@ -401,6 +722,7 @@ int wmain(int argumentCount, wchar_t* arguments[]) {
         DispatchMessageW(&message);
     }
 
+    shutdownDarkMode();
     FreeLibrary(darkModePlugin);
     return static_cast<int>(message.wParam);
 }

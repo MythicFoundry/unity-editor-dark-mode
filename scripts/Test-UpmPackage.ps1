@@ -50,8 +50,11 @@ if ($meta -cnotmatch '(?m)^  isPreloaded: 0\r?$' -or
 $bootstrap = Get-Content -LiteralPath $bootstrapPath -Raw
 if ($bootstrap -cnotmatch '\[InitializeOnLoadMethod\]' -or
     $bootstrap -cnotmatch 'AssetDatabase\.IsAssetImportWorkerProcess\(\)' -or
-    $bootstrap -cnotmatch 'EntryPoint\s*=\s*"UnityEditorDarkMode_Initialize"') {
-    throw 'The managed Editor bootstrap must initialize the native plug-in outside batch mode and Asset Import Workers.'
+    $bootstrap -cnotmatch 'EntryPoint\s*=\s*"UnityEditorDarkMode_Initialize"' -or
+    $bootstrap -cnotmatch 'EntryPoint\s*=\s*"UnityEditorDarkMode_Shutdown"' -or
+    $bootstrap -cnotmatch 'AssemblyReloadEvents\.beforeAssemblyReload' -or
+    $bootstrap -cnotmatch 'EditorApplication\.quitting') {
+    throw 'The managed Editor bootstrap must initialize and shut down the native plug-in outside batch mode and Asset Import Workers.'
 }
 
 $assemblyDefinition = Get-Content -LiteralPath $assemblyDefinitionPath -Raw | ConvertFrom-Json
@@ -63,19 +66,42 @@ if ($assemblyDefinition.name -cne 'MythicFoundry.UnityEditorDarkMode.Editor' -or
 }
 
 $definition = Get-Content -LiteralPath $definitionPath -Raw
-if ($definition -cnotmatch '(?m)^\s*UnityEditorDarkMode_Initialize(?:\s+@\d+)?\s*\r?$') {
-    throw 'The native module definition must export UnityEditorDarkMode_Initialize.'
+if ($definition -cnotmatch '(?m)^\s*UnityEditorDarkMode_Initialize(?:\s+@\d+)?\s*\r?$' -or
+    $definition -cnotmatch '(?m)^\s*UnityEditorDarkMode_Shutdown(?:\s+@\d+)?\s*\r?$') {
+    throw 'The native module definition must export the initialize and shutdown lifecycle functions.'
 }
 
 $source = Get-Content -LiteralPath $sourcePath -Raw
-if ($source -cnotmatch 'MAKEINTRESOURCEA\(136\)' -or
-    $source -cnotmatch '(?s)static void RefreshDarkMenuThemes\(\).*?g_setPreferredAppMode\(PreferredAppMode::ForceDark\);.*?g_flushMenuThemes\(\);' -or
-    ([regex]::Matches($source, 'RefreshDarkMenuThemes\(\);')).Count -ne 1 -or
-    $source -cnotmatch '(?s)UnityEditorDarkMode_Initialize\(\).*?RefreshDarkMenuThemes\(\);') {
-    throw 'The late native initializer must restore ForceDark mode and flush cached native menu themes.'
+if ($source -cnotmatch 'MAKEINTRESOURCEA\(104\)' -or
+    $source -cnotmatch 'MAKEINTRESOURCEA\(136\)' -or
+    $source -cnotmatch '(?s)static void RefreshDarkModeState\(\).*?g_refreshImmersiveColorPolicyState\(\);.*?g_setPreferredAppMode\(PreferredAppMode::ForceDark\);.*?g_flushMenuThemes\(\);' -or
+    $source -cnotmatch '(?s)UnityEditorDarkMode_Initialize\(\).*?RefreshDarkModeState\(\);' -or
+    $source -cnotmatch '(?s)case WM_THEMECHANGED:.*?case WM_SETTINGCHANGE:.*?RefreshDarkModeState\(\);.*?ThemeWindowTree\(hWnd\);') {
+    throw 'Native initialization and theme-change handling must refresh immersive policy, restore ForceDark mode, and flush cached menu themes.'
+}
+$dllMain = [regex]::Match($source, '(?s)BOOL APIENTRY DllMain\(.*\z').Value
+if (-not $dllMain -or
+    $dllMain -cmatch 'GetCurrentProcessId\(|RegisterWindowMessageW\(|EnableDarkMode\(|GetAllWindowsByProcessID\(|SetWindowsHookExW\(|EnsureWindowEventHook\(|UnhookWinEvent\(|UnhookWindowsHookEx\(|RemoveWindowSubclass\(|CloseThemeData\(') {
+    throw 'DllMain must remain loader-lock-safe and defer window, hook, and UxTheme work to explicit lifecycle exports.'
+}
+if ($source -cnotmatch 'GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS \| GET_MODULE_HANDLE_EX_FLAG_PIN' -or
+    $source -cnotmatch '(?s)UnityEditorDarkMode_Shutdown\(\).*?UnhookWinEvent\(g_windowEventHook\).*?UnhookWindowsHookEx\(g_hook\).*?RemoveWindowOnOwningThread\(hWnd\)') {
+    throw 'The native module must stay pinned while callbacks can exist and must tear them down explicitly on owner threads.'
 }
 if ($source -cnotmatch '(?s)SetWinEventHook\(\s*EVENT_OBJECT_SHOW,\s*EVENT_OBJECT_SHOW,\s*g_module,\s*WindowEventProc,\s*g_processId,\s*0,\s*WINEVENT_INCONTEXT\)') {
     throw 'The process-wide in-context WinEvent hook must identify the native plug-in module.'
+}
+if ($source -cnotmatch 'IsWndClass\(hWnd, L"WorkerW"\)' -or
+    $source -cnotmatch '\(style & ES_MULTILINE\) \? L"DarkMode_Explorer" : L"DarkMode_CFD"' -or
+    $source -cnotmatch 'SetWindowTheme\(hWnd, L"DarkMode_ItemsView", nullptr\)' -or
+    $source -cnotmatch 'kCommonFileDialogProperty' -or
+    $source -cnotmatch 'IsCommonFileDialogWindow\(hWnd\)') {
+    throw 'The native plug-in must theme the common file-dialog shell background, edit controls, and item selection surface.'
+}
+foreach ($paintFunction in @('PaintCheckOrRadioButton', 'PaintGroupBox', 'PaintTrackbar', 'PaintHotkeyControl', 'PaintStaticText')) {
+    if ($source -cnotmatch "static void $paintFunction\(") {
+        throw "The native plug-in is missing specialized dark painting through $paintFunction."
+    }
 }
 
 $stream = [System.IO.File]::OpenRead($dllPath)
@@ -99,9 +125,12 @@ finally {
 $module = [System.Runtime.InteropServices.NativeLibrary]::Load($dllPath)
 try {
     $initializeExport = [IntPtr]::Zero
+    $shutdownExport = [IntPtr]::Zero
     if (-not [System.Runtime.InteropServices.NativeLibrary]::TryGetExport($module, 'UnityEditorDarkMode_Initialize', [ref]$initializeExport) -or
-        $initializeExport -eq [IntPtr]::Zero) {
-        throw 'The packaged DLL does not export UnityEditorDarkMode_Initialize.'
+        $initializeExport -eq [IntPtr]::Zero -or
+        -not [System.Runtime.InteropServices.NativeLibrary]::TryGetExport($module, 'UnityEditorDarkMode_Shutdown', [ref]$shutdownExport) -or
+        $shutdownExport -eq [IntPtr]::Zero) {
+        throw 'The packaged DLL does not export both native lifecycle functions.'
     }
 }
 finally {

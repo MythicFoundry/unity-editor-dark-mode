@@ -62,5 +62,10 @@ if (UNITY_EDITOR_DARK_MODE_BUILD_HARNESS)
       COMMAND UnityEditorDarkModeHarness --verify-worker-dialog
     )
     set_tests_properties(UnityEditorDarkMode.WorkerThreadDialog PROPERTIES TIMEOUT 15)
+    add_test(
+      NAME UnityEditorDarkMode.FileDialog
+      COMMAND UnityEditorDarkModeHarness --verify-file-dialog
+    )
+    set_tests_properties(UnityEditorDarkMode.FileDialog PROPERTIES TIMEOUT 20)
   endif()
 endif()
