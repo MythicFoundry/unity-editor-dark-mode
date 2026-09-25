@@ -327,6 +327,17 @@ static LONG ReportHookException(DWORD exceptionCode, const wchar_t* callbackName
     return EXCEPTION_EXECUTE_HANDLER;
 }
 
+static void ReportWin32Failure(const wchar_t* operation, DWORD errorCode) {
+    wchar_t message[512] = {};
+    swprintf_s(
+        message,
+        L"[UnityEditorDarkMode] %s failed with Win32 error %lu.\n",
+        operation,
+        errorCode);
+    OutputDebugStringW(message);
+    fwprintf(stderr, L"%s", message);
+}
+
 static BOOL CALLBACK InitializeDarkModeApi(PINIT_ONCE, PVOID, PVOID*) {
     HMODULE hUxtheme = GetModuleHandleW(L"uxtheme.dll");
     if (!hUxtheme) {
@@ -682,6 +693,25 @@ static void CALLBACK WindowEventProc(
     }
     __except (ReportHookException(GetExceptionCode(), L"WindowEventProc")) {
     }
+}
+
+static bool EnsureWindowEventHook() {
+    if (g_windowEventHook) return true;
+
+    g_windowEventHook = SetWinEventHook(
+        EVENT_OBJECT_SHOW,
+        EVENT_OBJECT_SHOW,
+        g_module,
+        WindowEventProc,
+        g_processId,
+        0,
+        WINEVENT_INCONTEXT);
+    if (!g_windowEventHook) {
+        ReportWin32Failure(L"SetWinEventHook", GetLastError());
+        return false;
+    }
+
+    return true;
 }
 
 static LRESULT CBTProcImpl(int nCode, WPARAM wParam, LPARAM lParam) {
@@ -1218,16 +1248,7 @@ extern "C" BOOL APIENTRY UnityEditorDarkMode_Initialize() {
         }
     }
 
-    if (!g_windowEventHook) {
-        g_windowEventHook = SetWinEventHook(
-            EVENT_OBJECT_SHOW,
-            EVENT_OBJECT_SHOW,
-            nullptr,
-            WindowEventProc,
-            g_processId,
-            0,
-            WINEVENT_INCONTEXT);
-    }
+    const bool windowEventHookReady = EnsureWindowEventHook();
 
     BOOL darkModeEnabled = FALSE;
     HRESULT darkModeResult = unityWindow
@@ -1245,7 +1266,7 @@ extern "C" BOOL APIENTRY UnityEditorDarkMode_Initialize() {
             sizeof(darkModeEnabled));
     }
 
-    g_ready = SUCCEEDED(darkModeResult) && darkModeEnabled;
+    g_ready = windowEventHookReady && SUCCEEDED(darkModeResult) && darkModeEnabled;
     return g_ready ? TRUE : FALSE;
 }
 
@@ -1284,16 +1305,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
             if (g_hook) {
                 g_hookThreadId = GetCurrentThreadId();
             }
-            g_windowEventHook = SetWinEventHook(
-                EVENT_OBJECT_SHOW,
-                EVENT_OBJECT_SHOW,
-                nullptr,
-                WindowEventProc,
-                g_processId,
-                0,
-                WINEVENT_INCONTEXT);
-
-            g_ready = true;
+            g_ready = EnsureWindowEventHook();
             break;
         }
         case DLL_PROCESS_DETACH: {

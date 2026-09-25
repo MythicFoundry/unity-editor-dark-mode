@@ -5,7 +5,7 @@ This package contains the Windows x64 native plug-in and a managed Editor bootst
 Add this Git dependency to your project's `Packages/manifest.json` (use a published tag):
 
 ```json
-"com.mythicfoundry.unity-editor-dark-mode": "https://github.com/MythicFoundry/unity-editor-dark-mode.git?path=/Packages/com.mythicfoundry.unity-editor-dark-mode#v1.2.0-preview.3"
+"com.mythicfoundry.unity-editor-dark-mode": "https://github.com/MythicFoundry/unity-editor-dark-mode.git?path=/Packages/com.mythicfoundry.unity-editor-dark-mode#v1.2.0-preview.4"
 ```
 
 Restart Unity when upgrading from an earlier preloaded package version so Windows can unload the old native module. Do not install this package alongside another copy of `UnityEditorDarkMode.dll` in `Assets/Plugins`; remove the old copy as part of the migration.

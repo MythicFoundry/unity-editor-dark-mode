@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.22)
 
 project(UnityEditorDarkMode)
 set(CMAKE_CXX_STANDARD 20)
+include(CTest)
 
 # Set default build type to Release if not specified
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
@@ -54,5 +55,12 @@ if (UNITY_EDITOR_DARK_MODE_BUILD_HARNESS)
     target_link_options(UnityEditorDarkModeHarness PRIVATE
       "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'"
     )
+  endif()
+  if (BUILD_TESTING)
+    add_test(
+      NAME UnityEditorDarkMode.WorkerThreadDialog
+      COMMAND UnityEditorDarkModeHarness --verify-worker-dialog
+    )
+    set_tests_properties(UnityEditorDarkMode.WorkerThreadDialog PROPERTIES TIMEOUT 15)
   endif()
 endif()

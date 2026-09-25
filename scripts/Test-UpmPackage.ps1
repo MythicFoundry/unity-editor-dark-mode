@@ -74,6 +74,9 @@ if ($source -cnotmatch 'MAKEINTRESOURCEA\(136\)' -or
     $source -cnotmatch '(?s)UnityEditorDarkMode_Initialize\(\).*?RefreshDarkMenuThemes\(\);') {
     throw 'The late native initializer must restore ForceDark mode and flush cached native menu themes.'
 }
+if ($source -cnotmatch '(?s)SetWinEventHook\(\s*EVENT_OBJECT_SHOW,\s*EVENT_OBJECT_SHOW,\s*g_module,\s*WindowEventProc,\s*g_processId,\s*0,\s*WINEVENT_INCONTEXT\)') {
+    throw 'The process-wide in-context WinEvent hook must identify the native plug-in module.'
+}
 
 $stream = [System.IO.File]::OpenRead($dllPath)
 try {

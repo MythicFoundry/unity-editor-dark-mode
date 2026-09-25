@@ -3,14 +3,27 @@
 #include <cwchar>
 #include <windows.h>
 #include <commctrl.h>
+#include <dwmapi.h>
 
 #pragma comment(lib, "comctl32.lib")
+#pragma comment(lib, "dwmapi.lib")
 
 namespace {
 constexpr wchar_t kWindowClass[] = L"UnityContainerWndClass";
 constexpr int kCloseButtonId = 1001;
+constexpr int kWorkerButtonId = 1002;
+constexpr int kWorkerProgressId = 1003;
 constexpr int kForceDarkAppMode = 2;
 constexpr int kForceLightAppMode = 3;
+constexpr wchar_t kWorkerDialogFlag[] = L"--verify-worker-dialog";
+
+struct WorkerDialogState {
+    HWND owner = nullptr;
+    HWND button = nullptr;
+    int attempts = 0;
+    bool passed = false;
+    DWORD errorCode = ERROR_SUCCESS;
+};
 
 using SetPreferredAppMode = int(WINAPI*)(int);
 
@@ -71,10 +84,162 @@ HWND AddControl(
         GetModuleHandleW(nullptr),
         nullptr);
 }
+
+bool HasImmersiveDarkMode(HWND window) {
+    BOOL darkModeEnabled = FALSE;
+    HRESULT result = DwmGetWindowAttribute(
+        window,
+        static_cast<DWMWINDOWATTRIBUTE>(20),
+        &darkModeEnabled,
+        sizeof(darkModeEnabled));
+    if (FAILED(result)) {
+        result = DwmGetWindowAttribute(
+            window,
+            static_cast<DWMWINDOWATTRIBUTE>(19),
+            &darkModeEnabled,
+            sizeof(darkModeEnabled));
+    }
+    return SUCCEEDED(result) && darkModeEnabled;
 }
 
-int wmain() {
+INT_PTR CALLBACK WorkerDialogProc(HWND dialog, UINT message, WPARAM, LPARAM lParam) {
+    WorkerDialogState* state = reinterpret_cast<WorkerDialogState*>(
+        GetWindowLongPtrW(dialog, DWLP_USER));
+    switch (message) {
+        case WM_INITDIALOG:
+        {
+            state = reinterpret_cast<WorkerDialogState*>(lParam);
+            SetWindowLongPtrW(dialog, DWLP_USER, lParam);
+            SetWindowPos(
+                dialog,
+                nullptr,
+                -32000,
+                -32000,
+                440,
+                150,
+                SWP_NOACTIVATE | SWP_NOZORDER);
+            AddControl(dialog, L"Static", L"Building Player", SS_LEFT, 18, 18, 260, 22);
+            AddControl(
+                dialog,
+                PROGRESS_CLASSW,
+                L"",
+                PBS_SMOOTH,
+                18,
+                52,
+                400,
+                20,
+                kWorkerProgressId);
+            state->button = AddControl(
+                dialog,
+                L"Button",
+                L"Cancel",
+                BS_PUSHBUTTON,
+                318,
+                86,
+                100,
+                30,
+                kWorkerButtonId);
+            SetTimer(dialog, 1, 20, nullptr);
+            return TRUE;
+        }
+        case WM_TIMER:
+        {
+            if (!state) return FALSE;
+
+            const LONG_PTR buttonStyle = GetWindowLongPtrW(state->button, GWL_STYLE);
+            state->passed = HasImmersiveDarkMode(dialog) &&
+                (buttonStyle & BS_TYPEMASK) == BS_OWNERDRAW;
+            ++state->attempts;
+            if (state->passed || state->attempts >= 100) {
+                KillTimer(dialog, 1);
+                EndDialog(dialog, state->passed ? IDOK : IDCANCEL);
+            }
+            return TRUE;
+        }
+        default:
+            return FALSE;
+    }
+}
+
+DWORD WINAPI WorkerDialogThread(void* parameter) {
+    WorkerDialogState* state = static_cast<WorkerDialogState*>(parameter);
+    alignas(DWORD) struct {
+        DLGTEMPLATE dialog;
+        WORD menu;
+        WORD windowClass;
+        wchar_t title;
+    } dialogTemplate = {};
+    dialogTemplate.dialog.style = WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME;
+    dialogTemplate.dialog.dwExtendedStyle = WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
+    dialogTemplate.dialog.cdit = 0;
+    dialogTemplate.dialog.cx = 220;
+    dialogTemplate.dialog.cy = 75;
+
+    const INT_PTR result = DialogBoxIndirectParamW(
+        GetModuleHandleW(nullptr),
+        &dialogTemplate.dialog,
+        state->owner,
+        WorkerDialogProc,
+        reinterpret_cast<LPARAM>(state));
+    if (result == -1) {
+        state->errorCode = GetLastError();
+        return 1;
+    }
+    return state->passed ? 0 : 2;
+}
+
+bool VerifyWorkerThreadDialog(HWND owner) {
+    WorkerDialogState state = {};
+    state.owner = owner;
+    HANDLE thread = CreateThread(nullptr, 0, WorkerDialogThread, &state, 0, nullptr);
+    if (!thread) {
+        std::fprintf(stderr, "Could not create worker dialog thread (Win32 error %lu).\n", GetLastError());
+        return false;
+    }
+
+    DWORD waitResult = WAIT_TIMEOUT;
+    while (waitResult != WAIT_OBJECT_0) {
+        waitResult = MsgWaitForMultipleObjects(1, &thread, FALSE, 5000, QS_ALLINPUT);
+        if (waitResult == WAIT_OBJECT_0 + 1) {
+            MSG message = {};
+            while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
+                TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+        }
+        else if (waitResult != WAIT_OBJECT_0) {
+            std::fprintf(stderr, "Worker dialog test timed out or failed while waiting (result %lu).\n", waitResult);
+            CloseHandle(thread);
+            return false;
+        }
+    }
+
+    DWORD exitCode = 0;
+    GetExitCodeThread(thread, &exitCode);
+    CloseHandle(thread);
+    if (!state.passed || exitCode != 0) {
+        std::fprintf(
+            stderr,
+            "Worker-thread #32770 dialog was not fully themed (thread result %lu, Win32 error %lu).\n",
+            exitCode,
+            state.errorCode);
+        return false;
+    }
+
+    Trace("Verified worker-thread #32770 dialog dark title bar and child control theming.");
+    return true;
+}
+}
+
+int wmain(int argumentCount, wchar_t* arguments[]) {
     Trace("Starting harness.");
+    const bool verifyWorkerDialog = argumentCount == 2 &&
+        wcscmp(arguments[1], kWorkerDialogFlag) == 0;
+    if (argumentCount > 1 && !verifyWorkerDialog) {
+        std::fprintf(stderr, "Unknown harness argument.\n");
+        return 1;
+    }
+
     const HINSTANCE instance = GetModuleHandleW(nullptr);
     INITCOMMONCONTROLSEX commonControls = {
         sizeof(commonControls),
@@ -197,9 +362,11 @@ int wmain() {
 
     ApplyDefaultFont(window);
     Trace("Applied fonts.");
-    ShowWindow(window, SW_SHOW);
-    Trace("Showed harness window.");
-    UpdateWindow(window);
+    if (!verifyWorkerDialog) {
+        ShowWindow(window, SW_SHOW);
+        Trace("Showed harness window.");
+        UpdateWindow(window);
+    }
     if (!initializeDarkMode()) {
         Trace("UnityEditorDarkMode_Initialize could not attach to the harness window.");
         DestroyWindow(window);
@@ -219,6 +386,13 @@ int wmain() {
             return 4;
         }
         Trace("Verified late initialization restored ForceDark app mode.");
+    }
+
+    if (verifyWorkerDialog) {
+        const bool workerDialogPassed = VerifyWorkerThreadDialog(window);
+        DestroyWindow(window);
+        FreeLibrary(darkModePlugin);
+        return workerDialogPassed ? 0 : 5;
     }
 
     MSG message = {};

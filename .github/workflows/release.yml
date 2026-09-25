@@ -31,6 +31,9 @@ jobs:
     - name: Verify native source builds
       run: cmake -B build && cmake --build build --config Release
 
+    - name: Test auxiliary-thread dialog theming
+      run: ctest --test-dir build -C Release --output-on-failure
+
     - name: Publish GitHub release with the packaged DLL
       shell: pwsh
       env:
