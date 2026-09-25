@@ -3,6 +3,15 @@
   "version": "1.2.0-preview.8",
   "displayName": "Unity Editor Dark Mode",
   "description": "Windows-only native dark-mode plug-in for the Unity Editor.",
+  "unity": "2019.1",
+  "license": "MIT",
+  "keywords": [
+    "dark-mode",
+    "editor",
+    "theme",
+    "windows",
+    "native"
+  ],
   "author": {
     "name": "Mythic Foundry"
   }
