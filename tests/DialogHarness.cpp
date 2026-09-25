@@ -9,6 +9,10 @@
 namespace {
 constexpr wchar_t kWindowClass[] = L"UnityContainerWndClass";
 constexpr int kCloseButtonId = 1001;
+constexpr int kForceDarkAppMode = 2;
+constexpr int kForceLightAppMode = 3;
+
+using SetPreferredAppMode = int(WINAPI*)(int);
 
 void Trace(const char* message) {
     std::fprintf(stderr, "%s\n", message);
@@ -93,16 +97,13 @@ int wmain() {
         return 2;
     }
 
-    {
-        HMODULE uxtheme = GetModuleHandleW(L"uxtheme.dll");
-        using SetPreferredAppMode = int(WINAPI*)(int);
-        auto setPreferredAppMode = uxtheme
-            ? reinterpret_cast<SetPreferredAppMode>(GetProcAddress(uxtheme, MAKEINTRESOURCEA(135)))
-            : nullptr;
-        if (setPreferredAppMode) {
-            setPreferredAppMode(3); // ForceLight, simulating an explicit Unity override.
-            Trace("Reset process app mode to ForceLight before creating the window.");
-        }
+    HMODULE uxtheme = GetModuleHandleW(L"uxtheme.dll");
+    auto setPreferredAppMode = uxtheme
+        ? reinterpret_cast<SetPreferredAppMode>(GetProcAddress(uxtheme, MAKEINTRESOURCEA(135)))
+        : nullptr;
+    if (setPreferredAppMode) {
+        setPreferredAppMode(kForceLightAppMode); // Simulate an explicit Unity override.
+        Trace("Reset process app mode to ForceLight before creating the window.");
     }
 
     WNDCLASSEXW windowClass = {};
@@ -139,6 +140,13 @@ int wmain() {
         return 2;
     }
     Trace("Created harness window.");
+
+    HMENU menuBar = CreateMenu();
+    HMENU fileMenu = CreatePopupMenu();
+    AppendMenuW(fileMenu, MF_STRING, 3001, L"Open");
+    AppendMenuW(fileMenu, MF_STRING, 3002, L"Save");
+    AppendMenuW(menuBar, MF_POPUP, reinterpret_cast<UINT_PTR>(fileMenu), L"File");
+    SetMenu(window, menuBar);
 
     AddControl(window, L"Static", L"Native dialog title", SS_LEFT, 24, 22, 260, 24);
     AddControl(window, L"Static", L"Labels, inputs, choices, lists, trees, tabs, and progress bars", SS_LEFT, 24, 50, 560, 22);
@@ -199,6 +207,19 @@ int wmain() {
         return 3;
     }
     Trace("Initialized plugin after creating the harness window.");
+    if (setPreferredAppMode) {
+        const int previousAppMode = setPreferredAppMode(kForceDarkAppMode);
+        if (previousAppMode != kForceDarkAppMode) {
+            std::fprintf(
+                stderr,
+                "Late initialization did not restore ForceDark app mode (previous mode %d).\n",
+                previousAppMode);
+            DestroyWindow(window);
+            FreeLibrary(darkModePlugin);
+            return 4;
+        }
+        Trace("Verified late initialization restored ForceDark app mode.");
+    }
 
     MSG message = {};
     while (GetMessageW(&message, nullptr, 0, 0) > 0) {

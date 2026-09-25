@@ -20,7 +20,7 @@ A fully working runtime dark mode mod for Unity Editor on Windows with:
 The Windows Editor plug-in is available as `com.mythicfoundry.unity-editor-dark-mode` from a version tag in this repository. After the corresponding tag has been published, add this entry to your Unity project's `Packages/manifest.json` dependencies:
 
 ```json
-"com.mythicfoundry.unity-editor-dark-mode": "https://github.com/MythicFoundry/unity-editor-dark-mode.git?path=/Packages/com.mythicfoundry.unity-editor-dark-mode#v1.2.0-preview.2"
+"com.mythicfoundry.unity-editor-dark-mode": "https://github.com/MythicFoundry/unity-editor-dark-mode.git?path=/Packages/com.mythicfoundry.unity-editor-dark-mode#v1.2.0-preview.3"
 ```
 
 The package includes the native DLL, Windows Editor-only importer settings, and a managed bootstrap that loads and initializes the DLL after Package Manager registration on Unity's main Editor thread. Remove any existing `UnityEditorDarkMode.dll` under `Assets/Plugins` before installing the package; loading both copies is unsupported. Restart Unity when upgrading from an earlier preloaded package version so Windows can unload the old native module.

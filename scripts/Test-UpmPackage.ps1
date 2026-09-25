@@ -12,6 +12,7 @@ $configPath = "$dllPath.ini"
 $bootstrapPath = Join-Path $packageRoot 'Editor/UnityEditorDarkModeBootstrap.cs'
 $assemblyDefinitionPath = Join-Path $packageRoot 'Editor/MythicFoundry.UnityEditorDarkMode.Editor.asmdef'
 $definitionPath = Join-Path $repoRoot 'UnityEditorDarkMode.def'
+$sourcePath = Join-Path $repoRoot 'UnityEditorDarkMode.cpp'
 
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 if ($manifest.name -cne 'com.mythicfoundry.unity-editor-dark-mode') {
@@ -64,6 +65,14 @@ if ($assemblyDefinition.name -cne 'MythicFoundry.UnityEditorDarkMode.Editor' -or
 $definition = Get-Content -LiteralPath $definitionPath -Raw
 if ($definition -cnotmatch '(?m)^\s*UnityEditorDarkMode_Initialize(?:\s+@\d+)?\s*\r?$') {
     throw 'The native module definition must export UnityEditorDarkMode_Initialize.'
+}
+
+$source = Get-Content -LiteralPath $sourcePath -Raw
+if ($source -cnotmatch 'MAKEINTRESOURCEA\(136\)' -or
+    $source -cnotmatch '(?s)static void RefreshDarkMenuThemes\(\).*?g_setPreferredAppMode\(PreferredAppMode::ForceDark\);.*?g_flushMenuThemes\(\);' -or
+    ([regex]::Matches($source, 'RefreshDarkMenuThemes\(\);')).Count -ne 1 -or
+    $source -cnotmatch '(?s)UnityEditorDarkMode_Initialize\(\).*?RefreshDarkMenuThemes\(\);') {
+    throw 'The late native initializer must restore ForceDark mode and flush cached native menu themes.'
 }
 
 $stream = [System.IO.File]::OpenRead($dllPath)

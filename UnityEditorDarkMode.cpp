@@ -304,10 +304,12 @@ const theme_cfg* LoadThemeConfig() {
 // https://gist.github.com/ericoporto/1745f4b912e22f9eabfce2c7166d979b
 using fnAllowDarkModeForWindow = BOOL(WINAPI*)(HWND hWnd, BOOL allow);
 using fnSetPreferredAppMode = PreferredAppMode(WINAPI*)(PreferredAppMode appMode);
+using fnFlushMenuThemes = void(WINAPI*)();
 
 static INIT_ONCE g_darkModeApiInit = INIT_ONCE_STATIC_INIT;
 static fnAllowDarkModeForWindow g_allowDarkModeForWindow = nullptr;
 static fnSetPreferredAppMode g_setPreferredAppMode = nullptr;
+static fnFlushMenuThemes g_flushMenuThemes = nullptr;
 static bool g_ready = false;
 static thread_local bool g_applyingControlTheme = false;
 static thread_local unsigned int g_hookStage = 0;
@@ -338,6 +340,8 @@ static BOOL CALLBACK InitializeDarkModeApi(PINIT_ONCE, PVOID, PVOID*) {
             GetProcAddress(hUxtheme, MAKEINTRESOURCEA(133)));
         g_setPreferredAppMode = reinterpret_cast<fnSetPreferredAppMode>(
             GetProcAddress(hUxtheme, MAKEINTRESOURCEA(135)));
+        g_flushMenuThemes = reinterpret_cast<fnFlushMenuThemes>(
+            GetProcAddress(hUxtheme, MAKEINTRESOURCEA(136)));
         if (g_setPreferredAppMode) {
             g_setPreferredAppMode(PreferredAppMode::ForceDark);
         }
@@ -367,6 +371,17 @@ void EnableDarkMode(HWND hWnd) {
             static_cast<DWMWINDOWATTRIBUTE>(19), // Windows 10 1809 compatibility value
             &useDarkMode,
             sizeof(useDarkMode));
+    }
+}
+
+static void RefreshDarkMenuThemes() {
+    InitOnceExecuteOnce(&g_darkModeApiInit, InitializeDarkModeApi, nullptr, nullptr);
+
+    if (g_setPreferredAppMode) {
+        g_setPreferredAppMode(PreferredAppMode::ForceDark);
+    }
+    if (g_flushMenuThemes) {
+        g_flushMenuThemes();
     }
 }
 
@@ -1174,7 +1189,7 @@ extern "C" BOOL APIENTRY UnityEditorDarkMode_Initialize() {
         g_applyThemeMessage = RegisterWindowMessageW(L"UnityEditorDarkMode.ApplyTheme");
     }
 
-    EnableDarkMode(nullptr);
+    RefreshDarkMenuThemes();
 
     std::vector<HWND> windowHandles;
     GetAllWindowsByProcessID(g_processId, windowHandles);
