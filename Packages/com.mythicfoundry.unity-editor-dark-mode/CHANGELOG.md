@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.0-preview.9
+
+- Normalize the Windows common file dialog's navigation and command surfaces when shell controls ignore their assigned dark theme.
+- Preserve a visible accent selection row for the DirectUI file list, including inactive and keyboard-moved selection states.
+- Upgrade the native `IFileDialog` regression harness to select a real fixture folder and validate rendered header and selection pixels instead of theme handles alone.
+
 ## 1.2.0-preview.8
 
 - Keep the pinned native hooks and window subclasses active across managed assembly reloads so Unity's menu bar does not fall back to light Windows painting while managed callbacks run.

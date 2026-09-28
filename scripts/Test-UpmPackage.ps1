@@ -96,9 +96,13 @@ if ($source -cnotmatch '(?s)SetWinEventHook\(\s*EVENT_OBJECT_SHOW,\s*EVENT_OBJEC
 if ($source -cnotmatch 'IsWndClass\(hWnd, L"WorkerW"\)' -or
     $source -cnotmatch '\(style & ES_MULTILINE\) \? L"DarkMode_Explorer" : L"DarkMode_CFD"' -or
     $source -cnotmatch 'SetWindowTheme\(hWnd, L"DarkMode_ItemsView", nullptr\)' -or
+    $source -cnotmatch 'IsFileDialogNavigationControl\(hWnd\)' -or
+    $source -cnotmatch 'ColorizeFileDialogNavigationControl\(hWnd' -or
+    $source -cnotmatch 'PaintFileDialogSelectionIndicator\(hWnd' -or
+    $source -cnotmatch 'kFileDialogSelectedRowProperty' -or
     $source -cnotmatch 'kCommonFileDialogProperty' -or
     $source -cnotmatch 'IsCommonFileDialogWindow\(hWnd\)') {
-    throw 'The native plug-in must theme the common file-dialog shell background, edit controls, and item selection surface.'
+    throw 'The native plug-in must theme and verify the common file-dialog shell background, navigation surfaces, edit controls, and item selection indicator.'
 }
 foreach ($paintFunction in @('PaintCheckOrRadioButton', 'PaintGroupBox', 'PaintTrackbar', 'PaintHotkeyControl', 'PaintStaticText')) {
     if ($source -cnotmatch "static void $paintFunction\(") {

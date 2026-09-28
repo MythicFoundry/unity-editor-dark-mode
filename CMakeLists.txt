@@ -50,6 +50,7 @@ option(UNITY_EDITOR_DARK_MODE_BUILD_HARNESS "Build the native dialog visual test
 if (UNITY_EDITOR_DARK_MODE_BUILD_HARNESS)
   add_executable(UnityEditorDarkModeHarness tests/DialogHarness.cpp)
   add_dependencies(UnityEditorDarkModeHarness ${PROJECT_NAME})
+  target_link_libraries(UnityEditorDarkModeHarness PRIVATE Uiautomationcore)
   if (MSVC)
     target_compile_options(UnityEditorDarkModeHarness PRIVATE /W4 /permissive- /utf-8)
     target_link_options(UnityEditorDarkModeHarness PRIVATE

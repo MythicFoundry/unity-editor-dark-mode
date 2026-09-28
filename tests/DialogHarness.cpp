@@ -1,15 +1,22 @@
 #define WIN32_LEAN_AND_MEAN
 #include <cstdio>
 #include <cwchar>
+#include <algorithm>
+#include <fstream>
+#include <string>
+#include <vector>
 #include <windows.h>
 #include <commctrl.h>
 #include <dwmapi.h>
 #include <shobjidl.h>
+#include <uiautomation.h>
 #include <uxtheme.h>
 
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "dwmapi.lib")
 #pragma comment(lib, "ole32.lib")
+#pragma comment(lib, "shell32.lib")
+#pragma comment(lib, "uiautomationcore.lib")
 #pragma comment(lib, "uxtheme.lib")
 
 namespace {
@@ -43,6 +50,26 @@ struct WorkerDialogState {
 struct FileDialogState {
     HRESULT showResult = E_UNEXPECTED;
     bool passed = false;
+    wchar_t rootDirectory[MAX_PATH] = {};
+    wchar_t selectedFolderName[64] = {};
+};
+
+struct PixelCapture {
+    int width = 0;
+    int height = 0;
+    std::vector<BYTE> pixels;
+};
+
+struct FileDialogVisualState {
+    bool structureReady = false;
+    bool selectedItemFound = false;
+    bool selectedItemSelected = false;
+    bool selectionIndicatorPresent = false;
+    bool headerDark = false;
+    bool selectionVisible = false;
+    double headerLightRatio = 1.0;
+    double commandBarLightRatio = 1.0;
+    double selectionChangedRatio = 0.0;
 };
 
 struct WindowSearchState {
@@ -251,26 +278,322 @@ bool PaintsDarkClient(HWND window) {
         GetBValue(color) < 128;
 }
 
-bool IsFileDialogThemed(HWND dialog) {
+bool CaptureWindow(HWND window, PixelCapture* capture) {
+    RECT windowBounds = {};
+    if (!capture || !GetWindowRect(window, &windowBounds)) return false;
+
+    const int width = windowBounds.right - windowBounds.left;
+    const int height = windowBounds.bottom - windowBounds.top;
+    if (width <= 0 || height <= 0) return false;
+
+    BITMAPINFO bitmapInfo = {};
+    bitmapInfo.bmiHeader.biSize = sizeof(bitmapInfo.bmiHeader);
+    bitmapInfo.bmiHeader.biWidth = width;
+    bitmapInfo.bmiHeader.biHeight = -height;
+    bitmapInfo.bmiHeader.biPlanes = 1;
+    bitmapInfo.bmiHeader.biBitCount = 32;
+    bitmapInfo.bmiHeader.biCompression = BI_RGB;
+
+    HDC windowContext = GetWindowDC(window);
+    HDC memoryContext = CreateCompatibleDC(windowContext);
+    void* pixelData = nullptr;
+    HBITMAP bitmap = CreateDIBSection(
+        memoryContext,
+        &bitmapInfo,
+        DIB_RGB_COLORS,
+        &pixelData,
+        nullptr,
+        0);
+    if (!windowContext || !memoryContext || !bitmap || !pixelData) {
+        if (bitmap) DeleteObject(bitmap);
+        if (memoryContext) DeleteDC(memoryContext);
+        if (windowContext) ReleaseDC(window, windowContext);
+        return false;
+    }
+
+    HGDIOBJ oldBitmap = SelectObject(memoryContext, bitmap);
+    const BOOL painted = PrintWindow(window, memoryContext, 0x00000002);
+    capture->width = width;
+    capture->height = height;
+    capture->pixels.resize(static_cast<size_t>(width) * height * 4);
+    if (painted) {
+        std::copy_n(
+            static_cast<const BYTE*>(pixelData),
+            capture->pixels.size(),
+            capture->pixels.begin());
+    }
+
+    SelectObject(memoryContext, oldBitmap);
+    DeleteObject(bitmap);
+    DeleteDC(memoryContext);
+    ReleaseDC(window, windowContext);
+    return painted != FALSE;
+}
+
+RECT ToCaptureBounds(HWND dialog, const RECT& screenBounds) {
+    RECT dialogBounds = {};
+    GetWindowRect(dialog, &dialogBounds);
+    return {
+        screenBounds.left - dialogBounds.left,
+        screenBounds.top - dialogBounds.top,
+        screenBounds.right - dialogBounds.left,
+        screenBounds.bottom - dialogBounds.top
+    };
+}
+
+RECT ToCaptureBounds(HWND dialog, HWND child) {
+    RECT dialogBounds = {};
+    RECT childBounds = {};
+    GetWindowRect(dialog, &dialogBounds);
+    GetWindowRect(child, &childBounds);
+    OffsetRect(&childBounds, -dialogBounds.left, -dialogBounds.top);
+    return childBounds;
+}
+
+double LightPixelRatio(const PixelCapture& capture, RECT bounds) {
+    bounds.left = std::clamp(bounds.left + 4L, 0L, static_cast<LONG>(capture.width));
+    bounds.top = std::clamp(bounds.top + 4L, 0L, static_cast<LONG>(capture.height));
+    bounds.right = std::clamp(bounds.right - 4L, 0L, static_cast<LONG>(capture.width));
+    bounds.bottom = std::clamp(bounds.bottom - 4L, 0L, static_cast<LONG>(capture.height));
+
+    size_t sampled = 0;
+    size_t light = 0;
+    for (LONG y = bounds.top; y < bounds.bottom; y += 2) {
+        for (LONG x = bounds.left; x < bounds.right; x += 2) {
+            const size_t offset = (static_cast<size_t>(y) * capture.width + x) * 4;
+            const BYTE blue = capture.pixels[offset];
+            const BYTE green = capture.pixels[offset + 1];
+            const BYTE red = capture.pixels[offset + 2];
+            const int luminance = (red * 299 + green * 587 + blue * 114) / 1000;
+            ++sampled;
+            if (luminance >= 192) ++light;
+        }
+    }
+    return sampled ? static_cast<double>(light) / sampled : 1.0;
+}
+
+double ChangedPixelRatio(
+    const PixelCapture& before,
+    const PixelCapture& after,
+    RECT bounds) {
+    if (before.width != after.width || before.height != after.height) return 0.0;
+
+    bounds.left = std::clamp(bounds.left, 0L, static_cast<LONG>(before.width));
+    bounds.top = std::clamp(bounds.top, 0L, static_cast<LONG>(before.height));
+    bounds.right = std::clamp(bounds.right, 0L, static_cast<LONG>(before.width));
+    bounds.bottom = std::clamp(bounds.bottom, 0L, static_cast<LONG>(before.height));
+
+    size_t sampled = 0;
+    size_t changed = 0;
+    for (LONG y = bounds.top; y < bounds.bottom; y += 2) {
+        for (LONG x = bounds.left; x < bounds.right; x += 2) {
+            const size_t offset = (static_cast<size_t>(y) * before.width + x) * 4;
+            int maximumDifference = 0;
+            for (size_t channel = 0; channel < 3; ++channel) {
+                maximumDifference = std::max(
+                    maximumDifference,
+                    std::abs(
+                        static_cast<int>(before.pixels[offset + channel]) -
+                        static_cast<int>(after.pixels[offset + channel])));
+            }
+            ++sampled;
+            if (maximumDifference >= 12) ++changed;
+        }
+    }
+    return sampled ? static_cast<double>(changed) / sampled : 0.0;
+}
+
+bool SaveCapture(const PixelCapture& capture, const wchar_t* path) {
+    if (!path || !*path || capture.pixels.empty()) return false;
+
+    BITMAPFILEHEADER fileHeader = {};
+    BITMAPINFOHEADER infoHeader = {};
+    infoHeader.biSize = sizeof(infoHeader);
+    infoHeader.biWidth = capture.width;
+    infoHeader.biHeight = -capture.height;
+    infoHeader.biPlanes = 1;
+    infoHeader.biBitCount = 32;
+    infoHeader.biCompression = BI_RGB;
+    infoHeader.biSizeImage = static_cast<DWORD>(capture.pixels.size());
+    fileHeader.bfType = 0x4D42;
+    fileHeader.bfOffBits = sizeof(fileHeader) + sizeof(infoHeader);
+    fileHeader.bfSize = fileHeader.bfOffBits + infoHeader.biSizeImage;
+
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    if (!output) return false;
+    output.write(reinterpret_cast<const char*>(&fileHeader), sizeof(fileHeader));
+    output.write(reinterpret_cast<const char*>(&infoHeader), sizeof(infoHeader));
+    output.write(
+        reinterpret_cast<const char*>(capture.pixels.data()),
+        static_cast<std::streamsize>(capture.pixels.size()));
+    return output.good();
+}
+
+bool FindAndSelectAutomationItem(
+    HWND dialog,
+    const wchar_t* itemName,
+    RECT* itemBounds,
+    PixelCapture* beforeSelection,
+    bool* selected) {
+    IUIAutomation* automation = nullptr;
+    IUIAutomationElement* root = nullptr;
+    IUIAutomationCondition* nameCondition = nullptr;
+    IUIAutomationCondition* typeCondition = nullptr;
+    IUIAutomationCondition* itemCondition = nullptr;
+    IUIAutomationElement* item = nullptr;
+    IUIAutomationSelectionItemPattern* selection = nullptr;
+
+    VARIANT nameValue = {};
+    VariantInit(&nameValue);
+    nameValue.vt = VT_BSTR;
+    nameValue.bstrVal = SysAllocString(itemName);
+    VARIANT typeValue = {};
+    VariantInit(&typeValue);
+    typeValue.vt = VT_I4;
+    typeValue.lVal = UIA_ListItemControlTypeId;
+
+    HRESULT result = CoCreateInstance(
+        CLSID_CUIAutomation,
+        nullptr,
+        CLSCTX_INPROC_SERVER,
+        IID_PPV_ARGS(&automation));
+    if (SUCCEEDED(result)) result = automation->ElementFromHandle(dialog, &root);
+    if (SUCCEEDED(result)) {
+        result = automation->CreatePropertyCondition(
+            UIA_NamePropertyId,
+            nameValue,
+            &nameCondition);
+    }
+    if (SUCCEEDED(result)) {
+        result = automation->CreatePropertyCondition(
+            UIA_ControlTypePropertyId,
+            typeValue,
+            &typeCondition);
+    }
+    if (SUCCEEDED(result)) {
+        result = automation->CreateAndCondition(
+            nameCondition,
+            typeCondition,
+            &itemCondition);
+    }
+    if (SUCCEEDED(result)) {
+        result = root->FindFirst(TreeScope_Descendants, itemCondition, &item);
+        if (SUCCEEDED(result) && !item) result = UIA_E_ELEMENTNOTAVAILABLE;
+    }
+    if (SUCCEEDED(result)) result = item->get_CurrentBoundingRectangle(itemBounds);
+    if (SUCCEEDED(result) && !CaptureWindow(dialog, beforeSelection)) {
+        result = E_FAIL;
+    }
+    if (SUCCEEDED(result)) {
+        result = item->GetCurrentPatternAs(
+            UIA_SelectionItemPatternId,
+            IID_PPV_ARGS(&selection));
+    }
+    if (SUCCEEDED(result)) result = item->SetFocus();
+    if (SUCCEEDED(result)) {
+        HWND shellView = FindDescendantWindow(dialog, L"SHELLDLL_DefView");
+        HWND itemsView = shellView
+            ? FindDescendantWindow(shellView, L"DirectUIHWND")
+            : nullptr;
+        POINT itemScreenPoint = {
+            std::min(itemBounds->left + 24, itemBounds->right - 1),
+            (itemBounds->top + itemBounds->bottom) / 2
+        };
+        POINT itemPoint = itemScreenPoint;
+        if (itemsView && ScreenToClient(itemsView, &itemPoint)) {
+            SendMessageW(
+                itemsView,
+                WM_LBUTTONDOWN,
+                MK_LBUTTON,
+                MAKELPARAM(itemPoint.x, itemPoint.y));
+            SendMessageW(
+                itemsView,
+                WM_LBUTTONUP,
+                0,
+                MAKELPARAM(itemPoint.x, itemPoint.y));
+        }
+        result = selection->Select();
+    }
+    if (SUCCEEDED(result)) {
+        BOOL isSelected = FALSE;
+        result = selection->get_CurrentIsSelected(&isSelected);
+        *selected = SUCCEEDED(result) && isSelected != FALSE;
+    }
+
+    if (selection) selection->Release();
+    if (item) item->Release();
+    if (itemCondition) itemCondition->Release();
+    if (typeCondition) typeCondition->Release();
+    if (nameCondition) nameCondition->Release();
+    if (root) root->Release();
+    if (automation) automation->Release();
+    VariantClear(&typeValue);
+    VariantClear(&nameValue);
+    return SUCCEEDED(result);
+}
+
+FileDialogVisualState InspectFileDialog(
+    HWND dialog,
+    const wchar_t* selectedFolderName,
+    const wchar_t* capturePath) {
+    FileDialogVisualState state = {};
     HWND worker = FindDescendantWindow(dialog, L"WorkerW");
     HWND navigationBand = FindDescendantWindow(dialog, L"ReBarWindow32");
+    HWND contentHost = FindDescendantWindow(dialog, L"DUIViewWndClassName");
+    HWND commandHost = contentHost
+        ? FindDescendantWindow(contentHost, L"DirectUIHWND")
+        : nullptr;
     HWND shellView = FindDescendantWindow(dialog, L"SHELLDLL_DefView");
     HWND itemsView = shellView
         ? FindDescendantWindow(shellView, L"DirectUIHWND")
         : nullptr;
     HWND edit = FindDescendantWindow(dialog, L"Edit");
-    return HasImmersiveDarkMode(dialog) &&
+    state.structureReady = HasImmersiveDarkMode(dialog) &&
         worker &&
         navigationBand &&
+        commandHost &&
         shellView &&
         itemsView &&
         edit &&
-        GetWindowTheme(navigationBand) &&
         GetWindowTheme(edit) &&
         PaintsDarkBackground(worker);
+    if (!state.structureReady) return state;
+
+    PixelCapture before = {};
+    PixelCapture after = {};
+    RECT selectedItemBounds = {};
+    state.selectedItemFound = FindAndSelectAutomationItem(
+        dialog,
+        selectedFolderName,
+        &selectedItemBounds,
+        &before,
+        &state.selectedItemSelected);
+    if (!state.selectedItemFound || !state.selectedItemSelected) return state;
+
+    Sleep(250);
+    state.selectionIndicatorPresent = GetPropW(
+        itemsView,
+        L"MythicFoundry.UnityEditorDarkMode.SelectedRow") != nullptr;
+    if (!CaptureWindow(dialog, &after)) return state;
+
+    state.headerLightRatio = LightPixelRatio(after, ToCaptureBounds(dialog, navigationBand));
+    RECT commandBarBounds = ToCaptureBounds(dialog, commandHost);
+    commandBarBounds.bottom = std::min(
+        commandBarBounds.bottom,
+        commandBarBounds.top + MulDiv(31, GetDpiForWindow(commandHost), USER_DEFAULT_SCREEN_DPI));
+    state.commandBarLightRatio = LightPixelRatio(after, commandBarBounds);
+    state.selectionChangedRatio = ChangedPixelRatio(
+        before,
+        after,
+        ToCaptureBounds(dialog, selectedItemBounds));
+    state.headerDark = state.headerLightRatio < 0.25 &&
+        state.commandBarLightRatio < 0.25;
+    state.selectionVisible = state.selectionChangedRatio >= 0.08;
+    if (capturePath && *capturePath) SaveCapture(after, capturePath);
+    return state;
 }
 
-void ReportFileDialogThemeState(HWND dialog) {
+void ReportFileDialogThemeState(HWND dialog, const FileDialogVisualState& state) {
     HWND worker = FindDescendantWindow(dialog, L"WorkerW");
     HWND navigationBand = FindDescendantWindow(dialog, L"ReBarWindow32");
     HWND shellView = FindDescendantWindow(dialog, L"SHELLDLL_DefView");
@@ -280,7 +603,7 @@ void ReportFileDialogThemeState(HWND dialog) {
     HWND edit = FindDescendantWindow(dialog, L"Edit");
     std::fprintf(
         stderr,
-        "IFileDialog state: title=%d WorkerW=%d nav=%d nav-theme=%d shell=%d items=%d edit=%d edit-theme=%d WorkerW-dark=%d.\n",
+        "IFileDialog state: title=%d WorkerW=%d nav=%d nav-theme=%d shell=%d items=%d edit=%d edit-theme=%d WorkerW-dark=%d structure=%d item=%d selected=%d indicator=%d header-light=%.3f command-light=%.3f selection-change=%.3f.\n",
         HasImmersiveDarkMode(dialog),
         worker != nullptr,
         navigationBand != nullptr,
@@ -289,7 +612,14 @@ void ReportFileDialogThemeState(HWND dialog) {
         itemsView != nullptr,
         edit != nullptr,
         edit && GetWindowTheme(edit),
-        worker && PaintsDarkBackground(worker));
+        worker && PaintsDarkBackground(worker),
+        state.structureReady,
+        state.selectedItemFound,
+        state.selectedItemSelected,
+        state.selectionIndicatorPresent,
+        state.headerLightRatio,
+        state.commandBarLightRatio,
+        state.selectionChangedRatio);
 }
 
 INT_PTR CALLBACK WorkerDialogProc(HWND dialog, UINT message, WPARAM, LPARAM lParam) {
@@ -481,6 +811,15 @@ DWORD WINAPI FileDialogThread(void* parameter) {
                 options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_NOCHANGEDIR);
         }
         if (SUCCEEDED(result)) result = dialog->SetTitle(kFileDialogTitle);
+        IShellItem* initialFolder = nullptr;
+        if (SUCCEEDED(result)) {
+            result = SHCreateItemFromParsingName(
+                state->rootDirectory,
+                nullptr,
+                IID_PPV_ARGS(&initialFolder));
+        }
+        if (SUCCEEDED(result)) result = dialog->SetFolder(initialFolder);
+        if (initialFolder) initialFolder->Release();
         if (SUCCEEDED(result)) result = dialog->Show(nullptr);
         dialog->Release();
     }
@@ -492,18 +831,52 @@ DWORD WINAPI FileDialogThread(void* parameter) {
 
 bool VerifyFileDialog() {
     FileDialogState state = {};
+    wchar_t temporaryDirectory[MAX_PATH] = {};
+    if (!GetTempPathW(static_cast<DWORD>(_countof(temporaryDirectory)), temporaryDirectory)) {
+        std::fprintf(stderr, "Could not resolve the temporary directory (Win32 error %lu).\n", GetLastError());
+        return false;
+    }
+    swprintf_s(
+        state.rootDirectory,
+        L"%sUnityEditorDarkMode-%lu-%llu",
+        temporaryDirectory,
+        GetCurrentProcessId(),
+        GetTickCount64());
+    wcscpy_s(state.selectedFolderName, L"Selected folder");
+    std::wstring selectedFolderPath = state.rootDirectory;
+    selectedFolderPath += L"\\";
+    selectedFolderPath += state.selectedFolderName;
+    if (!CreateDirectoryW(state.rootDirectory, nullptr) ||
+        !CreateDirectoryW(selectedFolderPath.c_str(), nullptr)) {
+        std::fprintf(stderr, "Could not create the IFileDialog fixture (Win32 error %lu).\n", GetLastError());
+        RemoveDirectoryW(state.rootDirectory);
+        return false;
+    }
+
+    const HRESULT automationInitializeResult = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    const bool uninitializeAutomation = SUCCEEDED(automationInitializeResult);
     DWORD threadId = 0;
     HANDLE thread = CreateThread(nullptr, 0, FileDialogThread, &state, 0, &threadId);
     if (!thread) {
         std::fprintf(stderr, "Could not create IFileDialog thread (Win32 error %lu).\n", GetLastError());
+        if (uninitializeAutomation) CoUninitialize();
+        RemoveDirectoryW(selectedFolderPath.c_str());
+        RemoveDirectoryW(state.rootDirectory);
         return false;
     }
 
     HWND dialog = nullptr;
+    FileDialogVisualState visualState = {};
+    wchar_t capturePath[MAX_PATH] = {};
+    GetEnvironmentVariableW(
+        L"UNITY_EDITOR_DARK_MODE_CAPTURE_PATH",
+        capturePath,
+        static_cast<DWORD>(_countof(capturePath)));
     for (int attempt = 0; attempt < 250 && !state.passed; ++attempt) {
         if (WaitForSingleObject(thread, 20) == WAIT_OBJECT_0) break;
         dialog = FindThreadWindow(threadId, L"#32770", nullptr);
         if (!dialog) continue;
+        if (!FindDescendantWindow(dialog, L"SHELLDLL_DefView")) continue;
 
         SetWindowPos(
             dialog,
@@ -513,11 +886,21 @@ bool VerifyFileDialog() {
             0,
             0,
             SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER);
-        state.passed = IsFileDialogThemed(dialog);
+
+        Sleep(250);
+        visualState = InspectFileDialog(
+            dialog,
+            state.selectedFolderName,
+            capturePath);
+        state.passed = visualState.structureReady &&
+            visualState.headerDark &&
+            visualState.selectionIndicatorPresent &&
+            visualState.selectionVisible;
+        break;
     }
 
     if (dialog) {
-        if (!state.passed) ReportFileDialogThemeState(dialog);
+        ReportFileDialogThemeState(dialog, visualState);
         PostMessageW(dialog, WM_COMMAND, IDCANCEL, 0);
         PostMessageW(dialog, WM_CLOSE, 0, 0);
     }
@@ -527,6 +910,9 @@ bool VerifyFileDialog() {
     DWORD exitCode = 0;
     GetExitCodeThread(thread, &exitCode);
     CloseHandle(thread);
+    if (uninitializeAutomation) CoUninitialize();
+    RemoveDirectoryW(selectedFolderPath.c_str());
+    RemoveDirectoryW(state.rootDirectory);
     if (!state.passed || waitResult != WAIT_OBJECT_0 || exitCode != 0) {
         std::fprintf(
             stderr,
@@ -536,7 +922,7 @@ bool VerifyFileDialog() {
         return false;
     }
 
-    Trace("Verified IFileDialog title bar, shell hierarchy, item view, edit surface, and WorkerW background.");
+    Trace("Verified IFileDialog dark navigation band and visible selected-item treatment.");
     return true;
 }
 }
