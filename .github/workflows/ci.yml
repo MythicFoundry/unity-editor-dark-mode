@@ -32,6 +32,10 @@ jobs:
     - name: Test auxiliary-thread dialog theming
       run: ctest --test-dir build -C Release --output-on-failure
 
+    - name: Test Unity bootstrap compatibility
+      shell: pwsh
+      run: ./tests/Test-BootstrapCompatibility.ps1
+
     - name: Validate UPM package
       shell: pwsh
       run: ./scripts/Test-UpmPackage.ps1
@@ -42,4 +46,3 @@ jobs:
         name: ci-build
         path: build/Release
         retention-days: 14
-

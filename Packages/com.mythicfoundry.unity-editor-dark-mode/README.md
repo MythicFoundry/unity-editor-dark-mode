@@ -1,6 +1,6 @@
 # Unity Editor Dark Mode
 
-This package contains the Windows x64 native plug-in and a managed Editor bootstrap. The bootstrap loads the plug-in after Package Manager registration and initializes it on Unity's main Editor thread; it is not included in player builds.
+This package contains the Windows x64 native plug-in and a managed Editor bootstrap for Unity 2019.1 through Unity 6. The bootstrap loads the plug-in after Package Manager registration, selects the Asset Import Worker API available in the current Unity generation, and initializes the plug-in on Unity's main Editor thread; it is not included in player builds.
 
 Add this Git dependency to your project's `Packages/manifest.json` (use a published tag):
 

@@ -25,13 +25,24 @@ namespace MythicFoundry.UnityEditorDarkMode
         [InitializeOnLoadMethod]
         private static void QueueInitialization()
         {
-            if (Application.isBatchMode || AssetDatabase.IsAssetImportWorkerProcess()) return;
+            if (Application.isBatchMode || IsAssetImportWorkerProcess()) return;
 
             _initializationDeadline = EditorApplication.timeSinceStartup + _INITIALIZATION_TIMEOUT_SECONDS;
             EditorApplication.update -= Initialize;
             EditorApplication.update += Initialize;
             EditorApplication.quitting -= Shutdown;
             EditorApplication.quitting += Shutdown;
+        }
+
+        private static bool IsAssetImportWorkerProcess()
+        {
+#if UNITY_2020_2_OR_NEWER
+            return AssetDatabase.IsAssetImportWorkerProcess();
+#elif UNITY_2019_3_OR_NEWER
+            return UnityEditor.Experimental.AssetDatabaseExperimental.IsAssetImportWorkerProcess();
+#else
+            return false;
+#endif
         }
 
         private static void Initialize()

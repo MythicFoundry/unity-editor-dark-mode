@@ -11,7 +11,7 @@ A fully working runtime dark mode mod for Unity Editor on Windows with:
 - Dark Unity-owned native dialogs and progress windows
 - Dark standard controls, including buttons, labels, edit fields, lists, trees, tabs, tooltips, and progress bars
 
-> This runtime mod works on Windows 11 and Windows 10 1903+. Tested on Unity 2019, 2020, 2021, 2022, 2023 and Unity 6.
+> This runtime mod supports Unity 2019.1 through Unity 6 on Windows 11 x64 and Windows 10 1903+ x64. The managed bootstrap is compile-smoke tested across every Unity API generation in that range; visually validate native Editor surfaces on each Unity and Windows release line before publishing a stable package.
 
 ![Screenshot](screenshot.jpg?raw=true)
 

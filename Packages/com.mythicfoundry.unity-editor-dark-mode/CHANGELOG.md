@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.0-preview.11
+
+- Restore the declared Unity 2019.1 compatibility by selecting the available Asset Import Worker API for each Unity generation.
+- Keep Unity 2020.2 and newer on the current public API, use the experimental API only on Unity 2019.3 through 2020.1, and avoid unavailable worker APIs on Unity 2019.1 and 2019.2.
+- Add compile-smoke coverage for every managed bootstrap compatibility branch through Unity 6.
+
 ## 1.2.0-preview.10
 
 - Remove the unsafe common-file-dialog bitmap recoloring and guessed selection overlay introduced in preview.9.

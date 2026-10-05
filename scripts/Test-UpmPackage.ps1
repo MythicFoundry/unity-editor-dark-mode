@@ -13,6 +13,7 @@ $bootstrapPath = Join-Path $packageRoot 'Editor/UnityEditorDarkModeBootstrap.cs'
 $assemblyDefinitionPath = Join-Path $packageRoot 'Editor/MythicFoundry.UnityEditorDarkMode.Editor.asmdef'
 $definitionPath = Join-Path $repoRoot 'UnityEditorDarkMode.def'
 $sourcePath = Join-Path $repoRoot 'UnityEditorDarkMode.cpp'
+$bootstrapCompatibilityTestPath = Join-Path $repoRoot 'tests/Test-BootstrapCompatibility.ps1'
 
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 if ($manifest.name -cne 'com.mythicfoundry.unity-editor-dark-mode') {
@@ -49,7 +50,9 @@ if ($meta -cnotmatch '(?m)^  isPreloaded: 0\r?$' -or
 
 $bootstrap = Get-Content -LiteralPath $bootstrapPath -Raw
 if ($bootstrap -cnotmatch '\[InitializeOnLoadMethod\]' -or
-    $bootstrap -cnotmatch 'AssetDatabase\.IsAssetImportWorkerProcess\(\)' -or
+    $bootstrap -cnotmatch '#if UNITY_2020_2_OR_NEWER\s+return AssetDatabase\.IsAssetImportWorkerProcess\(\);' -or
+    $bootstrap -cnotmatch '#elif UNITY_2019_3_OR_NEWER\s+return UnityEditor\.Experimental\.AssetDatabaseExperimental\.IsAssetImportWorkerProcess\(\);' -or
+    $bootstrap -cnotmatch '#else\s+return false;\s+#endif' -or
     $bootstrap -cnotmatch 'EntryPoint\s*=\s*"UnityEditorDarkMode_Initialize"' -or
     $bootstrap -cnotmatch 'EntryPoint\s*=\s*"UnityEditorDarkMode_Shutdown"' -or
     $bootstrap -cnotmatch 'EditorApplication\.quitting') {
@@ -58,6 +61,7 @@ if ($bootstrap -cnotmatch '\[InitializeOnLoadMethod\]' -or
 if ($bootstrap -cmatch 'AssemblyReloadEvents\.beforeAssemblyReload') {
     throw 'The managed Editor bootstrap must keep the pinned native plug-in active across managed assembly reloads.'
 }
+& $bootstrapCompatibilityTestPath -BootstrapPath $bootstrapPath
 
 $assemblyDefinition = Get-Content -LiteralPath $assemblyDefinitionPath -Raw | ConvertFrom-Json
 if ($assemblyDefinition.name -cne 'MythicFoundry.UnityEditorDarkMode.Editor' -or
