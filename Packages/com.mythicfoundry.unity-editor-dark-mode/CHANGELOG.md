@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.0-preview.13
+
+- Correct Unity 2018.1 compatibility by using a command-line batch-mode fallback until `Application.isBatchMode` becomes available in Unity 2018.2.
+- Guard the Editor quit callback introduced in Unity 2018.1 and compile-smoke test Unity 2017.1, 2017.2, 2017.3, and 2017.4 with their actual API surface and legacy C# language level.
+- Limit the UPM assembly definition to legacy-supported fields and add an `Assets/Editor` distribution that omits assembly definitions and version-specific metadata for Unity 2017.
+
 ## 1.2.0-preview.12
 
 - Extend the declared minimum Editor version from Unity 2019.1 to Unity 2018.1.

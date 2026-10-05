@@ -11,7 +11,7 @@ A fully working runtime dark mode mod for Unity Editor on Windows with:
 - Dark Unity-owned native dialogs and progress windows
 - Dark standard controls, including buttons, labels, edit fields, lists, trees, tabs, tooltips, and progress bars
 
-> This runtime mod supports Unity 2018.1 through Unity 6 on Windows 11 x64 and Windows 10 1903+ x64. The managed bootstrap is compile-smoke tested across every Unity release line in that range; visually validate native Editor surfaces on each Unity and Windows release line before publishing a stable package.
+> This runtime mod supports Unity 2017.1 through Unity 6 on Windows 11 x64 and Windows 10 1903+ x64. The managed bootstrap is compile-smoke tested against Unity 2017.1-2017.4, Unity 2018.1-2018.4, and representative newer release lines; visually validate native Editor surfaces on each Unity and Windows release line before publishing a stable package.
 
 ![Screenshot](screenshot.jpg?raw=true)
 
@@ -20,14 +20,25 @@ A fully working runtime dark mode mod for Unity Editor on Windows with:
 The Windows Editor plug-in is available as `com.mythicfoundry.unity-editor-dark-mode` from a version tag in this repository. After the corresponding tag has been published, add this entry to your Unity project's `Packages/manifest.json` dependencies:
 
 ```json
-"com.mythicfoundry.unity-editor-dark-mode": "https://github.com/MythicFoundry/unity-editor-dark-mode.git?path=/Packages/com.mythicfoundry.unity-editor-dark-mode#v1.2.0-preview.12"
+"com.mythicfoundry.unity-editor-dark-mode": "https://github.com/MythicFoundry/unity-editor-dark-mode.git?path=/Packages/com.mythicfoundry.unity-editor-dark-mode#v1.2.0-preview.13"
 ```
 
 The package includes the native DLL, Windows Editor-only importer settings, and a managed bootstrap that loads and initializes the DLL after Package Manager registration on Unity's main Editor thread. Remove any existing `UnityEditorDarkMode.dll` under `Assets/Plugins` before installing the package; loading both copies is unsupported. Restart Unity after upgrading because the initialized native module stays pinned for callback safety until the Editor process exits.
 
-Older Package Manager versions, including versions shipped with Unity 2018, may not support Git dependencies that select a package subfolder with `?path=`. If that URL is rejected, copy `Packages/com.mythicfoundry.unity-editor-dark-mode` into the project's `Packages` directory as an embedded package. This is an installation-path limitation; the packaged bootstrap is compile-smoke tested for Unity 2018.1, 2018.2, 2018.3, and 2018.4.
+Older Package Manager versions, including versions shipped with Unity 2018, may not support Git dependencies that select a package subfolder with `?path=`. If that URL is rejected, copy `Packages/com.mythicfoundry.unity-editor-dark-mode` into the project's `Packages` directory as an embedded package. This is an installation-path limitation; the UPM package declares Unity 2018.1 as its minimum and its assembly definition uses only fields understood by that release.
 
 Git dependencies contain files committed at the tag. A DLL uploaded as a GitHub Release asset alone is not included in the Unity package dependency.
+
+## Unity 2017 legacy Assets installation
+
+Unity 2017 predates the supported custom Git-UPM route, and Unity 2017.1-2017.2 also predate assembly definitions. Generate the legacy distribution instead:
+
+```powershell
+pwsh -File scripts/Stage-UpmPackage.ps1
+pwsh -File scripts/Stage-LegacyAssetsPackage.ps1
+```
+
+Copy the generated `build/LegacyAssetsPackage/Assets` directory into the root of the Unity project and restart the Editor. The distribution places the bootstrap under `Assets/Editor` and the native DLL under `Assets/Editor/UnityEditorDarkMode/x86_64`, allowing Unity 2017 to infer editor-only x64 plug-in settings without an assembly definition. It intentionally omits `.meta` files so the target Editor generates metadata in its own format. Do not combine this distribution with the UPM package or another copy of the DLL.
 
 ## Easy installation guide
 - Download the `UnityEditorDarkMode.unitypackage` from Unity [AssetStore](https://assetstore.unity.com/packages/slug/281842) or GitHub [Releases](https://github.com/0x7c13/UnityEditor-DarkMode/releases) and double click to install it to your Unity project.
@@ -124,8 +135,9 @@ Remove the DLL from your project and restart Unity Editor (You need to close the
 
 1. Update the version in `Packages/com.mythicfoundry.unity-editor-dark-mode/package.json` and its `CHANGELOG.md`.
 2. Run `pwsh -File scripts/Stage-UpmPackage.ps1` to build and copy the DLL into the package folder. The script validates the package and its Windows x64 DLL. If CMake is not on `PATH`, pass its executable path with `-CMake`.
-3. Commit the source and staged package together. Push the commit and wait for CI to pass.
-4. Create and push a tag named `v<package-version>` on that commit. The tag workflow validates that the tag matches `package.json`, checks that the native source builds, and publishes a GitHub Release with the packaged DLL attached. Unity fetches the DLL from the tagged repository contents, not from the release attachment.
+3. Run `pwsh -File scripts/Stage-LegacyAssetsPackage.ps1` to generate the Unity 2017-compatible `Assets` distribution from the same validated bootstrap, DLL, and configuration.
+4. Commit the source and staged package together. Push the commit and wait for CI to pass.
+5. Create and push a tag named `v<package-version>` on that commit. The tag workflow validates that the tag matches `package.json`, checks that the native source builds, and publishes a GitHub Release with the packaged DLL and zipped legacy `Assets` distribution attached. Unity fetches the UPM DLL from the tagged repository contents, not from the release attachment.
 
 Do not tag a version until its native UI behavior has been visually checked in Unity. Upgrading from a preloaded package version requires a Unity restart; obtain permission before restarting someone else's Editor session.
 

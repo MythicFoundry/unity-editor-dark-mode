@@ -40,9 +40,15 @@ jobs:
       shell: pwsh
       run: ./scripts/Test-UpmPackage.ps1
 
+    - name: Stage Unity 2017 legacy Assets package
+      shell: pwsh
+      run: ./scripts/Stage-LegacyAssetsPackage.ps1
+
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4.3.1
       with:
         name: ci-build
-        path: build/Release
+        path: |
+          build/Release
+          build/LegacyAssetsPackage
         retention-days: 14

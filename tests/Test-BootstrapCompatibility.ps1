@@ -5,29 +5,50 @@ param(
 $ErrorActionPreference = 'Stop'
 $bootstrapSource = Get-Content -LiteralPath $BootstrapPath -Raw
 $scenarios = @(
-    [pscustomobject]@{ Name = 'Unity 2018.1'; Defines = @('UNITY_EDITOR_WIN'); PublicWorkerApi = $false; ExperimentalWorkerApi = $false },
-    [pscustomobject]@{ Name = 'Unity 2018.2'; Defines = @('UNITY_EDITOR_WIN'); PublicWorkerApi = $false; ExperimentalWorkerApi = $false },
-    [pscustomobject]@{ Name = 'Unity 2018.3'; Defines = @('UNITY_EDITOR_WIN'); PublicWorkerApi = $false; ExperimentalWorkerApi = $false },
-    [pscustomobject]@{ Name = 'Unity 2018.4'; Defines = @('UNITY_EDITOR_WIN'); PublicWorkerApi = $false; ExperimentalWorkerApi = $false },
-    [pscustomobject]@{ Name = 'Unity 2019.1'; Defines = @('UNITY_EDITOR_WIN'); PublicWorkerApi = $false; ExperimentalWorkerApi = $false },
-    [pscustomobject]@{ Name = 'Unity 2019.2'; Defines = @('UNITY_EDITOR_WIN'); PublicWorkerApi = $false; ExperimentalWorkerApi = $false },
-    [pscustomobject]@{ Name = 'Unity 2019.3'; Defines = @('UNITY_EDITOR_WIN', 'UNITY_2019_3_OR_NEWER'); PublicWorkerApi = $false; ExperimentalWorkerApi = $true },
-    [pscustomobject]@{ Name = 'Unity 2019.4'; Defines = @('UNITY_EDITOR_WIN', 'UNITY_2019_3_OR_NEWER'); PublicWorkerApi = $false; ExperimentalWorkerApi = $true },
-    [pscustomobject]@{ Name = 'Unity 2020.1'; Defines = @('UNITY_EDITOR_WIN', 'UNITY_2019_3_OR_NEWER'); PublicWorkerApi = $false; ExperimentalWorkerApi = $true },
-    [pscustomobject]@{ Name = 'Unity 2020.2'; Defines = @('UNITY_EDITOR_WIN', 'UNITY_2019_3_OR_NEWER', 'UNITY_2020_2_OR_NEWER'); PublicWorkerApi = $true; ExperimentalWorkerApi = $false },
-    [pscustomobject]@{ Name = 'Unity 2020.3'; Defines = @('UNITY_EDITOR_WIN', 'UNITY_2019_3_OR_NEWER', 'UNITY_2020_2_OR_NEWER'); PublicWorkerApi = $true; ExperimentalWorkerApi = $false },
-    [pscustomobject]@{ Name = 'Unity 2021.3'; Defines = @('UNITY_EDITOR_WIN', 'UNITY_2019_3_OR_NEWER', 'UNITY_2020_2_OR_NEWER'); PublicWorkerApi = $true; ExperimentalWorkerApi = $false },
-    [pscustomobject]@{ Name = 'Unity 2022.3'; Defines = @('UNITY_EDITOR_WIN', 'UNITY_2019_3_OR_NEWER', 'UNITY_2020_2_OR_NEWER'); PublicWorkerApi = $true; ExperimentalWorkerApi = $false },
-    [pscustomobject]@{ Name = 'Unity 2023.2'; Defines = @('UNITY_EDITOR_WIN', 'UNITY_2019_3_OR_NEWER', 'UNITY_2020_2_OR_NEWER'); PublicWorkerApi = $true; ExperimentalWorkerApi = $false },
-    [pscustomobject]@{ Name = 'Unity 6'; Defines = @('UNITY_EDITOR_WIN', 'UNITY_2019_3_OR_NEWER', 'UNITY_2020_2_OR_NEWER'); PublicWorkerApi = $true; ExperimentalWorkerApi = $false }
+    [pscustomobject]@{ Name = 'Unity 2017.1'; Defines = @('UNITY_EDITOR_WIN'); BatchModeApi = $false; QuittingApi = $false; PublicWorkerApi = $false; ExperimentalWorkerApi = $false },
+    [pscustomobject]@{ Name = 'Unity 2017.2'; Defines = @('UNITY_EDITOR_WIN'); BatchModeApi = $false; QuittingApi = $false; PublicWorkerApi = $false; ExperimentalWorkerApi = $false },
+    [pscustomobject]@{ Name = 'Unity 2017.3'; Defines = @('UNITY_EDITOR_WIN'); BatchModeApi = $false; QuittingApi = $false; PublicWorkerApi = $false; ExperimentalWorkerApi = $false },
+    [pscustomobject]@{ Name = 'Unity 2017.4'; Defines = @('UNITY_EDITOR_WIN'); BatchModeApi = $false; QuittingApi = $false; PublicWorkerApi = $false; ExperimentalWorkerApi = $false },
+    [pscustomobject]@{ Name = 'Unity 2018.1'; Defines = @('UNITY_EDITOR_WIN', 'UNITY_2018_1_OR_NEWER'); BatchModeApi = $false; QuittingApi = $true; PublicWorkerApi = $false; ExperimentalWorkerApi = $false },
+    [pscustomobject]@{ Name = 'Unity 2018.2'; Defines = @('UNITY_EDITOR_WIN', 'UNITY_2018_1_OR_NEWER', 'UNITY_2018_2_OR_NEWER'); BatchModeApi = $true; QuittingApi = $true; PublicWorkerApi = $false; ExperimentalWorkerApi = $false },
+    [pscustomobject]@{ Name = 'Unity 2018.3'; Defines = @('UNITY_EDITOR_WIN', 'UNITY_2018_1_OR_NEWER', 'UNITY_2018_2_OR_NEWER'); BatchModeApi = $true; QuittingApi = $true; PublicWorkerApi = $false; ExperimentalWorkerApi = $false },
+    [pscustomobject]@{ Name = 'Unity 2018.4'; Defines = @('UNITY_EDITOR_WIN', 'UNITY_2018_1_OR_NEWER', 'UNITY_2018_2_OR_NEWER'); BatchModeApi = $true; QuittingApi = $true; PublicWorkerApi = $false; ExperimentalWorkerApi = $false },
+    [pscustomobject]@{ Name = 'Unity 2019.1'; Defines = @('UNITY_EDITOR_WIN', 'UNITY_2018_1_OR_NEWER', 'UNITY_2018_2_OR_NEWER'); BatchModeApi = $true; QuittingApi = $true; PublicWorkerApi = $false; ExperimentalWorkerApi = $false },
+    [pscustomobject]@{ Name = 'Unity 2019.2'; Defines = @('UNITY_EDITOR_WIN', 'UNITY_2018_1_OR_NEWER', 'UNITY_2018_2_OR_NEWER'); BatchModeApi = $true; QuittingApi = $true; PublicWorkerApi = $false; ExperimentalWorkerApi = $false },
+    [pscustomobject]@{ Name = 'Unity 2019.3'; Defines = @('UNITY_EDITOR_WIN', 'UNITY_2018_1_OR_NEWER', 'UNITY_2018_2_OR_NEWER', 'UNITY_2019_3_OR_NEWER'); BatchModeApi = $true; QuittingApi = $true; PublicWorkerApi = $false; ExperimentalWorkerApi = $true },
+    [pscustomobject]@{ Name = 'Unity 2019.4'; Defines = @('UNITY_EDITOR_WIN', 'UNITY_2018_1_OR_NEWER', 'UNITY_2018_2_OR_NEWER', 'UNITY_2019_3_OR_NEWER'); BatchModeApi = $true; QuittingApi = $true; PublicWorkerApi = $false; ExperimentalWorkerApi = $true },
+    [pscustomobject]@{ Name = 'Unity 2020.1'; Defines = @('UNITY_EDITOR_WIN', 'UNITY_2018_1_OR_NEWER', 'UNITY_2018_2_OR_NEWER', 'UNITY_2019_3_OR_NEWER'); BatchModeApi = $true; QuittingApi = $true; PublicWorkerApi = $false; ExperimentalWorkerApi = $true },
+    [pscustomobject]@{ Name = 'Unity 2020.2'; Defines = @('UNITY_EDITOR_WIN', 'UNITY_2018_1_OR_NEWER', 'UNITY_2018_2_OR_NEWER', 'UNITY_2019_3_OR_NEWER', 'UNITY_2020_2_OR_NEWER'); BatchModeApi = $true; QuittingApi = $true; PublicWorkerApi = $true; ExperimentalWorkerApi = $false },
+    [pscustomobject]@{ Name = 'Unity 2020.3'; Defines = @('UNITY_EDITOR_WIN', 'UNITY_2018_1_OR_NEWER', 'UNITY_2018_2_OR_NEWER', 'UNITY_2019_3_OR_NEWER', 'UNITY_2020_2_OR_NEWER'); BatchModeApi = $true; QuittingApi = $true; PublicWorkerApi = $true; ExperimentalWorkerApi = $false },
+    [pscustomobject]@{ Name = 'Unity 2021.3'; Defines = @('UNITY_EDITOR_WIN', 'UNITY_2018_1_OR_NEWER', 'UNITY_2018_2_OR_NEWER', 'UNITY_2019_3_OR_NEWER', 'UNITY_2020_2_OR_NEWER'); BatchModeApi = $true; QuittingApi = $true; PublicWorkerApi = $true; ExperimentalWorkerApi = $false },
+    [pscustomobject]@{ Name = 'Unity 2022.3'; Defines = @('UNITY_EDITOR_WIN', 'UNITY_2018_1_OR_NEWER', 'UNITY_2018_2_OR_NEWER', 'UNITY_2019_3_OR_NEWER', 'UNITY_2020_2_OR_NEWER'); BatchModeApi = $true; QuittingApi = $true; PublicWorkerApi = $true; ExperimentalWorkerApi = $false },
+    [pscustomobject]@{ Name = 'Unity 2023.2'; Defines = @('UNITY_EDITOR_WIN', 'UNITY_2018_1_OR_NEWER', 'UNITY_2018_2_OR_NEWER', 'UNITY_2019_3_OR_NEWER', 'UNITY_2020_2_OR_NEWER'); BatchModeApi = $true; QuittingApi = $true; PublicWorkerApi = $true; ExperimentalWorkerApi = $false },
+    [pscustomobject]@{ Name = 'Unity 6'; Defines = @('UNITY_EDITOR_WIN', 'UNITY_2018_1_OR_NEWER', 'UNITY_2018_2_OR_NEWER', 'UNITY_2019_3_OR_NEWER', 'UNITY_2020_2_OR_NEWER'); BatchModeApi = $true; QuittingApi = $true; PublicWorkerApi = $true; ExperimentalWorkerApi = $false }
 )
 
 $temporaryRoot = Join-Path ([System.IO.Path]::GetTempPath()) "UnityEditorDarkMode-Bootstrap-$([guid]::NewGuid().ToString('N'))"
 [System.IO.Directory]::CreateDirectory($temporaryRoot) | Out-Null
 try {
     foreach ($scenario in $scenarios) {
+        $batchModeApplicationType = if ($scenario.BatchModeApi) {
+            @'
+    public static class Application
+    {
+        public static bool isBatchMode { get { return false; } }
+    }
+'@
+        }
+        else {
+            [string]::Empty
+        }
+        $quittingEvent = if ($scenario.QuittingApi) {
+            'public static event System.Action quitting { add { } remove { } }'
+        }
+        else {
+            [string]::Empty
+        }
         $publicWorkerMethod = if ($scenario.PublicWorkerApi) {
-            'public static bool IsAssetImportWorkerProcess() => false;'
+            'public static bool IsAssetImportWorkerProcess() { return false; }'
         }
         else {
             [string]::Empty
@@ -38,7 +59,7 @@ namespace UnityEditor.Experimental
 {
     public static class AssetDatabaseExperimental
     {
-        public static bool IsAssetImportWorkerProcess() => false;
+        public static bool IsAssetImportWorkerProcess() { return false; }
     }
 }
 '@
@@ -49,10 +70,7 @@ namespace UnityEditor.Experimental
         $stubSource = @"
 namespace UnityEngine
 {
-    public static class Application
-    {
-        public static bool isBatchMode => false;
-    }
+$batchModeApplicationType
 
     public static class Debug
     {
@@ -73,9 +91,9 @@ namespace UnityEditor
 
     public static class EditorApplication
     {
-        public static double timeSinceStartup => 0.0;
+        public static double timeSinceStartup { get { return 0.0; } }
         public static event System.Action update { add { } remove { } }
-        public static event System.Action quitting { add { } remove { } }
+        $quittingEvent
     }
 }
 
@@ -91,7 +109,7 @@ $experimentalWorkerType
         $defineOption = "/define:$($scenario.Defines -join ';')"
         $command = @"
 `$ErrorActionPreference = 'Stop'
-Add-Type -Path '$($sourcePath.Replace("'", "''"))' -CompilerOptions @('$defineOption', '/langversion:6')
+Add-Type -Path '$($sourcePath.Replace("'", "''"))' -CompilerOptions @('$defineOption', '/langversion:4')
 "@
         $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
         & (Get-Process -Id $PID).Path -NoLogo -NoProfile -EncodedCommand $encodedCommand

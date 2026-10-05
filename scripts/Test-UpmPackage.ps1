@@ -14,6 +14,7 @@ $assemblyDefinitionPath = Join-Path $packageRoot 'Editor/MythicFoundry.UnityEdit
 $definitionPath = Join-Path $repoRoot 'UnityEditorDarkMode.def'
 $sourcePath = Join-Path $repoRoot 'UnityEditorDarkMode.cpp'
 $bootstrapCompatibilityTestPath = Join-Path $repoRoot 'tests/Test-BootstrapCompatibility.ps1'
+$legacyStagerPath = Join-Path $repoRoot 'scripts/Stage-LegacyAssetsPackage.ps1'
 
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 if ($manifest.name -cne 'com.mythicfoundry.unity-editor-dark-mode') {
@@ -26,10 +27,10 @@ if ($ExpectedVersion -and $manifest.version -cne $ExpectedVersion) {
     throw "Package version $($manifest.version) does not match expected $ExpectedVersion."
 }
 if ($manifest.unity -cne '2018.1') {
-    throw "Package minimum Unity version $($manifest.unity) does not match supported minimum 2018.1."
+    throw "Package minimum Unity version $($manifest.unity) does not match the UPM layout minimum 2018.1."
 }
 
-foreach ($requiredFile in @($dllPath, $metaPath, $configPath, "$configPath.meta", $bootstrapPath, "$bootstrapPath.meta", $assemblyDefinitionPath, "$assemblyDefinitionPath.meta", (Join-Path $packageRoot 'LICENSE.md'))) {
+foreach ($requiredFile in @($dllPath, $metaPath, $configPath, "$configPath.meta", $bootstrapPath, "$bootstrapPath.meta", $assemblyDefinitionPath, "$assemblyDefinitionPath.meta", (Join-Path $packageRoot 'LICENSE.md'), $legacyStagerPath)) {
     if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {
         throw "Required package file missing: $requiredFile"
     }
@@ -53,13 +54,15 @@ if ($meta -cnotmatch '(?m)^  isPreloaded: 0\r?$' -or
 
 $bootstrap = Get-Content -LiteralPath $bootstrapPath -Raw
 if ($bootstrap -cnotmatch '\[InitializeOnLoadMethod\]' -or
+    $bootstrap -cnotmatch '#if UNITY_2018_2_OR_NEWER\s+return Application\.isBatchMode;\s+#else(?s:.*?)Environment\.GetCommandLineArgs\(\)(?s:.*?)StringComparison\.OrdinalIgnoreCase(?s:.*?)#endif' -or
+    $bootstrap -cnotmatch '#if UNITY_2018_1_OR_NEWER\s+EditorApplication\.quitting -= Shutdown;\s+EditorApplication\.quitting \+= Shutdown;\s+#endif' -or
     $bootstrap -cnotmatch '#if UNITY_2020_2_OR_NEWER\s+return AssetDatabase\.IsAssetImportWorkerProcess\(\);' -or
     $bootstrap -cnotmatch '#elif UNITY_2019_3_OR_NEWER\s+return UnityEditor\.Experimental\.AssetDatabaseExperimental\.IsAssetImportWorkerProcess\(\);' -or
     $bootstrap -cnotmatch '#else\s+return false;\s+#endif' -or
     $bootstrap -cnotmatch 'EntryPoint\s*=\s*"UnityEditorDarkMode_Initialize"' -or
     $bootstrap -cnotmatch 'EntryPoint\s*=\s*"UnityEditorDarkMode_Shutdown"' -or
     $bootstrap -cnotmatch 'EditorApplication\.quitting') {
-    throw 'The managed Editor bootstrap must initialize outside batch mode and Asset Import Workers and shut down the native plug-in when the Editor quits.'
+    throw 'The managed Editor bootstrap must avoid unavailable legacy APIs, initialize outside batch mode and Asset Import Workers, and shut down the native plug-in when the Editor exposes a quit callback.'
 }
 if ($bootstrap -cmatch 'AssemblyReloadEvents\.beforeAssemblyReload') {
     throw 'The managed Editor bootstrap must keep the pinned native plug-in active across managed assembly reloads.'
@@ -67,11 +70,57 @@ if ($bootstrap -cmatch 'AssemblyReloadEvents\.beforeAssemblyReload') {
 & $bootstrapCompatibilityTestPath -BootstrapPath $bootstrapPath
 
 $assemblyDefinition = Get-Content -LiteralPath $assemblyDefinitionPath -Raw | ConvertFrom-Json
+$assemblyDefinitionPropertyNames = @($assemblyDefinition.PSObject.Properties.Name)
+$unsupportedAssemblyDefinitionProperties = @(
+    $assemblyDefinitionPropertyNames |
+        Where-Object { $_ -cnotin @('name', 'references', 'includePlatforms', 'excludePlatforms') }
+)
 if ($assemblyDefinition.name -cne 'MythicFoundry.UnityEditorDarkMode.Editor' -or
-    $assemblyDefinition.rootNamespace -cne 'MythicFoundry.UnityEditorDarkMode' -or
+    $unsupportedAssemblyDefinitionProperties.Count -ne 0 -or
+    $assemblyDefinitionPropertyNames -ccontains 'excludePlatforms' -or
     @($assemblyDefinition.includePlatforms).Count -ne 1 -or
     $assemblyDefinition.includePlatforms[0] -cne 'Editor') {
-    throw 'The managed bootstrap assembly must be Editor-only and use the MythicFoundry.UnityEditorDarkMode root namespace.'
+    throw 'The managed bootstrap assembly must be Editor-only and use only the assembly-definition fields supported by Unity 2017.3.'
+}
+
+$temporaryBase = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
+$legacyTemporaryRoot = Join-Path $temporaryBase "UnityEditorDarkMode-Legacy-$([guid]::NewGuid().ToString('N'))"
+if (-not ([System.IO.Path]::GetFullPath($legacyTemporaryRoot)).StartsWith($temporaryBase, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "Legacy package test path escaped the temporary directory: $legacyTemporaryRoot"
+}
+try {
+    & $legacyStagerPath -OutputRoot $legacyTemporaryRoot
+
+    $legacyEditorRoot = Join-Path $legacyTemporaryRoot 'Assets/Editor/UnityEditorDarkMode'
+    $legacyNativeRoot = Join-Path $legacyEditorRoot 'x86_64'
+    $legacyMappings = @(
+        [pscustomobject]@{ Source = $bootstrapPath; Destination = Join-Path $legacyEditorRoot 'UnityEditorDarkModeBootstrap.cs' },
+        [pscustomobject]@{ Source = $dllPath; Destination = Join-Path $legacyNativeRoot 'UnityEditorDarkMode.dll' },
+        [pscustomobject]@{ Source = $configPath; Destination = Join-Path $legacyNativeRoot 'UnityEditorDarkMode.dll.ini' },
+        [pscustomobject]@{ Source = Join-Path $packageRoot 'LICENSE.md'; Destination = Join-Path $legacyTemporaryRoot 'LICENSE.md' }
+    )
+    foreach ($mapping in $legacyMappings) {
+        if (-not (Test-Path -LiteralPath $mapping.Destination -PathType Leaf)) {
+            throw "Legacy Assets package file missing: $($mapping.Destination)"
+        }
+        if ((Get-FileHash -LiteralPath $mapping.Source -Algorithm SHA256).Hash -cne
+            (Get-FileHash -LiteralPath $mapping.Destination -Algorithm SHA256).Hash) {
+            throw "Legacy Assets package file does not match its canonical source: $($mapping.Destination)"
+        }
+    }
+    $legacyMetadataFiles = @(
+        Get-ChildItem -LiteralPath $legacyTemporaryRoot -Recurse -File |
+            Where-Object { $_.Extension -in @('.asmdef', '.meta') }
+    )
+    if (-not (Test-Path -LiteralPath (Join-Path $legacyTemporaryRoot 'README.txt') -PathType Leaf) -or
+        $legacyMetadataFiles.Count -ne 0) {
+        throw 'The legacy Assets package must include its installation instructions and omit assembly definitions and version-specific Unity metadata.'
+    }
+}
+finally {
+    if (Test-Path -LiteralPath $legacyTemporaryRoot) {
+        Remove-Item -LiteralPath $legacyTemporaryRoot -Recurse -Force
+    }
 }
 
 $definition = Get-Content -LiteralPath $definitionPath -Raw

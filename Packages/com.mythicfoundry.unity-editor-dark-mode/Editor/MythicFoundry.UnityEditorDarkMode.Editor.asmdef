@@ -1,16 +1,7 @@
 {
   "name": "MythicFoundry.UnityEditorDarkMode.Editor",
-  "rootNamespace": "MythicFoundry.UnityEditorDarkMode",
   "references": [],
   "includePlatforms": [
     "Editor"
-  ],
-  "excludePlatforms": [],
-  "allowUnsafeCode": false,
-  "overrideReferences": false,
-  "precompiledReferences": [],
-  "autoReferenced": true,
-  "defineConstraints": [],
-  "versionDefines": [],
-  "noEngineReferences": false
+  ]
 }
