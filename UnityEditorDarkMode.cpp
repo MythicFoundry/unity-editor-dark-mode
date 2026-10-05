@@ -35,8 +35,6 @@
 #include <dwmapi.h>
 #pragma comment(lib, "dwmapi.lib")
 
-#pragma comment(lib, "msimg32.lib")
-
 // inipp from https://github.com/mcmtroffaes/inipp
 #include "inipp.h"
 
@@ -462,25 +460,20 @@ static bool IsFileDialogItemsView(HWND hWnd) {
             HasAncestorClass(hWnd, L"SHELLDLL_DefView"));
 }
 
-static bool IsFileDialogNavigationControl(HWND hWnd) {
+static bool IsFileDialogShellManagedControl(HWND hWnd) {
     return IsWndClass(hWnd, L"ReBarWindow32") ||
-        IsWndClass(hWnd, L"TravelBand") ||
-        IsWndClass(hWnd, L"UpBand") ||
-        IsWndClass(hWnd, L"Address Band Root") ||
-        IsWndClass(hWnd, L"Breadcrumb Parent") ||
-        IsWndClass(hWnd, L"UniversalSearchBand") ||
-        IsWndClass(hWnd, L"Search Box") ||
-        IsWndClass(hWnd, L"SearchEditBoxWrapperClass") ||
-        IsWndClass(hWnd, L"SeparatorBand") ||
-        IsWndClass(hWnd, L"ToolbarWindow32") ||
-        (IsWndClass(hWnd, L"DirectUIHWND") &&
-            HasAncestorClass(hWnd, L"UniversalSearchBand"));
+        HasAncestorClass(hWnd, L"ReBarWindow32") ||
+        IsWndClass(hWnd, L"DUIViewWndClassName") ||
+        IsWndClass(hWnd, L"SHELLDLL_DefView") ||
+        IsWndClass(hWnd, L"DirectUIHWND") ||
+        IsWndClass(hWnd, L"CtrlNotifySink") ||
+        IsWndClass(hWnd, L"NamespaceTreeControl") ||
+        (IsWndClass(hWnd, L"SysTreeView32") &&
+            HasAncestorClass(hWnd, L"NamespaceTreeControl"));
 }
 
 static constexpr wchar_t kCommonFileDialogProperty[] =
     L"MythicFoundry.UnityEditorDarkMode.CommonFileDialog";
-static constexpr wchar_t kFileDialogSelectedRowProperty[] =
-    L"MythicFoundry.UnityEditorDarkMode.SelectedRow";
 
 static BOOL CALLBACK FindShellViewWindow(HWND hWnd, LPARAM parameter) {
     if (!IsWndClass(hWnd, L"SHELLDLL_DefView")) return TRUE;
@@ -509,12 +502,6 @@ static bool IsCommonFileDialogWindow(HWND hWnd) {
     HWND root = GetAncestor(hWnd, GA_ROOT);
     if (!root) root = hWnd;
     return GetPropW(root, kCommonFileDialogProperty) != nullptr;
-}
-
-static bool IsFileDialogCommandHost(HWND hWnd) {
-    return IsWndClass(hWnd, L"DirectUIHWND") &&
-        IsWndClass(GetParent(hWnd), L"DUIViewWndClassName") &&
-        IsCommonFileDialogWindow(hWnd);
 }
 
 static bool IsKnownControlClass(HWND hWnd) {
@@ -668,8 +655,10 @@ static void ApplyControlTheme(HWND hWnd) {
     else if (IsWndClass(hWnd, L"ComboBox") || IsWndClass(hWnd, L"ComboBoxEx32")) {
         SetWindowTheme(hWnd, L"DarkMode_CFD", nullptr);
     }
-    else if (IsCommonFileDialogWindow(hWnd) && IsFileDialogNavigationControl(hWnd)) {
-        SetWindowTheme(hWnd, L"", L"");
+    else if (IsCommonFileDialogWindow(hWnd) && IsFileDialogShellManagedControl(hWnd)) {
+        // The shell owns these private controls and assigns their version-specific
+        // themes and image resources. Overriding them with DarkMode_Explorer can
+        // downgrade the navigation glyphs and desynchronize DirectUI colors.
     }
     else if (IsWndClass(hWnd, L"DirectUIHWND") && IsFileDialogItemsView(hWnd)) {
         // Keep the file-list selection visible. Applying ItemsView only to the
@@ -729,209 +718,6 @@ static void ApplyControlTheme(HWND hWnd) {
     g_hookStage = 0x22;
     RefreshControlColors(hWnd);
     g_applyingControlTheme = false;
-}
-
-static UINT GetWindowDpi(HWND hWnd) {
-    using GetDpiForWindowFunction = UINT(WINAPI*)(HWND);
-    static const auto getDpiForWindow = reinterpret_cast<GetDpiForWindowFunction>(
-        GetProcAddress(GetModuleHandleW(L"user32.dll"), "GetDpiForWindow"));
-    return getDpiForWindow ? getDpiForWindow(hWnd) : USER_DEFAULT_SCREEN_DPI;
-}
-
-static void UpdateFileDialogSelectionIndicator(HWND hWnd, LPARAM lParam) {
-    if (!IsWndClass(hWnd, L"DirectUIHWND") || !IsFileDialogItemsView(hWnd)) return;
-
-    const int pointerY = static_cast<short>(HIWORD(lParam));
-    const UINT dpi = GetWindowDpi(hWnd);
-    const int headerHeight = MulDiv(30, dpi, USER_DEFAULT_SCREEN_DPI);
-    const int rowHeight = std::max(1, MulDiv(24, dpi, USER_DEFAULT_SCREEN_DPI));
-    if (pointerY < headerHeight) {
-        RemovePropW(hWnd, kFileDialogSelectedRowProperty);
-    }
-    else {
-        const int rowTop = headerHeight + ((pointerY - headerHeight) / rowHeight) * rowHeight;
-        SetPropW(
-            hWnd,
-            kFileDialogSelectedRowProperty,
-            reinterpret_cast<HANDLE>(static_cast<INT_PTR>(rowTop + 1)));
-    }
-    InvalidateRect(hWnd, nullptr, FALSE);
-}
-
-static void MoveFileDialogSelectionIndicator(HWND hWnd, WPARAM key) {
-    HANDLE rowValue = GetPropW(hWnd, kFileDialogSelectedRowProperty);
-    if (!rowValue || (key != VK_UP && key != VK_DOWN)) return;
-
-    const int rowHeight = std::max(
-        1,
-        MulDiv(24, GetWindowDpi(hWnd), USER_DEFAULT_SCREEN_DPI));
-    int rowTop = static_cast<int>(reinterpret_cast<INT_PTR>(rowValue)) - 1;
-    rowTop = std::max(0, rowTop + (key == VK_UP ? -rowHeight : rowHeight));
-    SetPropW(
-        hWnd,
-        kFileDialogSelectedRowProperty,
-        reinterpret_cast<HANDLE>(static_cast<INT_PTR>(rowTop + 1)));
-    InvalidateRect(hWnd, nullptr, FALSE);
-}
-
-static void PaintFileDialogSelectionIndicator(HWND hWnd, HDC suppliedDeviceContext = nullptr) {
-    HANDLE rowValue = GetPropW(hWnd, kFileDialogSelectedRowProperty);
-    if (!rowValue) return;
-
-    RECT clientBounds = {};
-    GetClientRect(hWnd, &clientBounds);
-    const int rowHeight = std::max(
-        1,
-        MulDiv(24, GetWindowDpi(hWnd), USER_DEFAULT_SCREEN_DPI));
-    RECT selectionBounds = clientBounds;
-    selectionBounds.top = static_cast<int>(reinterpret_cast<INT_PTR>(rowValue)) - 1;
-    selectionBounds.bottom = std::min(clientBounds.bottom, selectionBounds.top + rowHeight);
-    if (selectionBounds.top < 0 || selectionBounds.top >= selectionBounds.bottom) return;
-
-    HDC target = suppliedDeviceContext ? suppliedDeviceContext : GetDC(hWnd);
-    HDC source = CreateCompatibleDC(target);
-    BITMAPINFO bitmapInfo = {};
-    bitmapInfo.bmiHeader.biSize = sizeof(bitmapInfo.bmiHeader);
-    bitmapInfo.bmiHeader.biWidth = 1;
-    bitmapInfo.bmiHeader.biHeight = -1;
-    bitmapInfo.bmiHeader.biPlanes = 1;
-    bitmapInfo.bmiHeader.biBitCount = 32;
-    bitmapInfo.bmiHeader.biCompression = BI_RGB;
-    void* pixelData = nullptr;
-    HBITMAP bitmap = CreateDIBSection(
-        source,
-        &bitmapInfo,
-        DIB_RGB_COLORS,
-        &pixelData,
-        nullptr,
-        0);
-    if (!target || !source || !bitmap || !pixelData) {
-        if (bitmap) DeleteObject(bitmap);
-        if (source) DeleteDC(source);
-        if (target && !suppliedDeviceContext) ReleaseDC(hWnd, target);
-        return;
-    }
-
-    const COLORREF accentColor = GetSysColor(COLOR_HIGHLIGHT);
-    *static_cast<DWORD*>(pixelData) =
-        GetBValue(accentColor) |
-        (static_cast<DWORD>(GetGValue(accentColor)) << 8) |
-        (static_cast<DWORD>(GetRValue(accentColor)) << 16);
-    HGDIOBJ oldBitmap = SelectObject(source, bitmap);
-    const BLENDFUNCTION blend = { AC_SRC_OVER, 0, 88, 0 };
-    AlphaBlend(
-        target,
-        selectionBounds.left,
-        selectionBounds.top,
-        selectionBounds.right - selectionBounds.left,
-        selectionBounds.bottom - selectionBounds.top,
-        source,
-        0,
-        0,
-        1,
-        1,
-        blend);
-    HBRUSH borderBrush = CreateSolidBrush(accentColor);
-    FrameRect(target, &selectionBounds, borderBrush);
-    DeleteObject(borderBrush);
-    SelectObject(source, oldBitmap);
-    DeleteObject(bitmap);
-    DeleteDC(source);
-    if (!suppliedDeviceContext) ReleaseDC(hWnd, target);
-}
-
-static void ColorizeFileDialogNavigationControl(
-    HWND hWnd,
-    HDC suppliedDeviceContext = nullptr,
-    int maximumHeight = 0) {
-    RECT bounds = {};
-    GetClientRect(hWnd, &bounds);
-    const int width = bounds.right - bounds.left;
-    const int height = maximumHeight > 0
-        ? std::min(static_cast<int>(bounds.bottom - bounds.top), maximumHeight)
-        : bounds.bottom - bounds.top;
-    if (width <= 0 || height <= 0) return;
-
-    HDC target = suppliedDeviceContext ? suppliedDeviceContext : GetDC(hWnd);
-    HDC memory = CreateCompatibleDC(target);
-    BITMAPINFO bitmapInfo = {};
-    bitmapInfo.bmiHeader.biSize = sizeof(bitmapInfo.bmiHeader);
-    bitmapInfo.bmiHeader.biWidth = width;
-    bitmapInfo.bmiHeader.biHeight = -height;
-    bitmapInfo.bmiHeader.biPlanes = 1;
-    bitmapInfo.bmiHeader.biBitCount = 32;
-    bitmapInfo.bmiHeader.biCompression = BI_RGB;
-    void* pixelData = nullptr;
-    HBITMAP bitmap = CreateDIBSection(
-        memory,
-        &bitmapInfo,
-        DIB_RGB_COLORS,
-        &pixelData,
-        nullptr,
-        0);
-    if (!target || !memory || !bitmap || !pixelData) {
-        if (bitmap) DeleteObject(bitmap);
-        if (memory) DeleteDC(memory);
-        if (target && !suppliedDeviceContext) ReleaseDC(hWnd, target);
-        return;
-    }
-
-    HGDIOBJ oldBitmap = SelectObject(memory, bitmap);
-    BitBlt(memory, 0, 0, width, height, target, 0, 0, SRCCOPY);
-    DWORD* pixels = static_cast<DWORD*>(pixelData);
-    size_t lightNeutralPixels = 0;
-    const size_t pixelCount = static_cast<size_t>(width) * height;
-    for (size_t index = 0; index < pixelCount; ++index) {
-        const BYTE blue = static_cast<BYTE>(pixels[index]);
-        const BYTE green = static_cast<BYTE>(pixels[index] >> 8);
-        const BYTE red = static_cast<BYTE>(pixels[index] >> 16);
-        const BYTE maximum = std::max({ red, green, blue });
-        const BYTE minimum = std::min({ red, green, blue });
-        const int luminance = (red * 299 + green * 587 + blue * 114) / 1000;
-        if (maximum - minimum <= 18 && luminance >= 180) ++lightNeutralPixels;
-    }
-
-    const bool lightSurface = lightNeutralPixels * 2 > pixelCount;
-    const theme_cfg* theme = LoadThemeConfig();
-    const BYTE backgroundRed = GetRValue(theme->control_bgcolor);
-    const BYTE backgroundGreen = GetGValue(theme->control_bgcolor);
-    const BYTE backgroundBlue = GetBValue(theme->control_bgcolor);
-    const BYTE textRed = GetRValue(theme->dialog_textcolor);
-    const BYTE textGreen = GetGValue(theme->dialog_textcolor);
-    const BYTE textBlue = GetBValue(theme->dialog_textcolor);
-    const int backgroundLuminance =
-        (backgroundRed * 299 + backgroundGreen * 587 + backgroundBlue * 114) / 1000;
-    for (size_t index = 0; index < pixelCount; ++index) {
-        const BYTE blue = static_cast<BYTE>(pixels[index]);
-        const BYTE green = static_cast<BYTE>(pixels[index] >> 8);
-        const BYTE red = static_cast<BYTE>(pixels[index] >> 16);
-        const BYTE maximum = std::max({ red, green, blue });
-        const BYTE minimum = std::min({ red, green, blue });
-        const int luminance = (red * 299 + green * 587 + blue * 114) / 1000;
-        if (maximum - minimum > 18) continue;
-
-        if (!lightSurface && luminance >= backgroundLuminance) continue;
-
-        const int range = lightSurface ? 255 : std::max(1, backgroundLuminance);
-        const int backgroundWeight = std::clamp(luminance, 0, range);
-        const int textWeight = range - backgroundWeight;
-        const BYTE mappedRed = static_cast<BYTE>(
-            (backgroundRed * backgroundWeight + textRed * textWeight) / range);
-        const BYTE mappedGreen = static_cast<BYTE>(
-            (backgroundGreen * backgroundWeight + textGreen * textWeight) / range);
-        const BYTE mappedBlue = static_cast<BYTE>(
-            (backgroundBlue * backgroundWeight + textBlue * textWeight) / range);
-        pixels[index] =
-            mappedBlue |
-            (static_cast<DWORD>(mappedGreen) << 8) |
-            (static_cast<DWORD>(mappedRed) << 16);
-    }
-
-    BitBlt(target, 0, 0, width, height, memory, 0, 0, SRCCOPY);
-    SelectObject(memory, oldBitmap);
-    DeleteObject(bitmap);
-    DeleteDC(memory);
-    if (!suppliedDeviceContext) ReleaseDC(hWnd, target);
 }
 
 static void ThemeWindow(HWND hWnd) {
@@ -1041,7 +827,6 @@ static void ThemeWindowOnOwningThread(HWND hWnd) {
 }
 
 static BOOL CALLBACK RemoveChildSubclass(HWND hWnd, LPARAM) {
-    RemovePropW(hWnd, kFileDialogSelectedRowProperty);
     RemoveWindowSubclass(hWnd, CallWndSubClassProc, 0);
     return TRUE;
 }
@@ -1050,7 +835,6 @@ static void RemoveWindowTree(HWND hWnd) {
     if (!hWnd || !IsWindow(hWnd) || !IsCurrentProcessWindow(hWnd)) return;
 
     EnumChildWindows(hWnd, RemoveChildSubclass, 0);
-    RemovePropW(hWnd, kFileDialogSelectedRowProperty);
     RemoveWindowSubclass(hWnd, CallWndSubClassProc, 0);
     if (IsTopLevelWindow(hWnd)) {
         RemovePropW(hWnd, kCommonFileDialogProperty);
@@ -1766,15 +1550,6 @@ static LRESULT CallWndSubClassProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPAR
         }
         case WM_ERASEBKGND:
         {
-            if (IsCommonFileDialogWindow(hWnd) && IsFileDialogNavigationControl(hWnd)) {
-                RECT bounds = {};
-                GetClientRect(hWnd, &bounds);
-                FillRect(
-                    reinterpret_cast<HDC>(wParam),
-                    &bounds,
-                    LoadThemeConfig()->control_bgbrush);
-                return TRUE;
-            }
             if (IsCustomPaintedControl(hWnd)) {
                 RECT bounds = {};
                 GetClientRect(hWnd, &bounds);
@@ -1850,24 +1625,6 @@ static LRESULT CallWndSubClassProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPAR
         }
         case WM_PAINT:
         {
-            if (IsCommonFileDialogWindow(hWnd) && IsFileDialogNavigationControl(hWnd)) {
-                const LRESULT result = DefSubclassProc(hWnd, uMsg, wParam, lParam);
-                ColorizeFileDialogNavigationControl(hWnd);
-                return result;
-            }
-            if (IsFileDialogCommandHost(hWnd)) {
-                const LRESULT result = DefSubclassProc(hWnd, uMsg, wParam, lParam);
-                ColorizeFileDialogNavigationControl(
-                    hWnd,
-                    nullptr,
-                    MulDiv(31, GetWindowDpi(hWnd), USER_DEFAULT_SCREEN_DPI));
-                return result;
-            }
-            if (IsWndClass(hWnd, L"DirectUIHWND") && IsFileDialogItemsView(hWnd)) {
-                const LRESULT result = DefSubclassProc(hWnd, uMsg, wParam, lParam);
-                PaintFileDialogSelectionIndicator(hWnd);
-                return result;
-            }
             if (PaintSpecializedControl(hWnd)) {
                 return 0;
             }
@@ -1890,24 +1647,6 @@ static LRESULT CallWndSubClassProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPAR
         }
         case WM_PRINTCLIENT:
         {
-            if (IsCommonFileDialogWindow(hWnd) && IsFileDialogNavigationControl(hWnd)) {
-                const LRESULT result = DefSubclassProc(hWnd, uMsg, wParam, lParam);
-                ColorizeFileDialogNavigationControl(hWnd, reinterpret_cast<HDC>(wParam));
-                return result;
-            }
-            if (IsFileDialogCommandHost(hWnd)) {
-                const LRESULT result = DefSubclassProc(hWnd, uMsg, wParam, lParam);
-                ColorizeFileDialogNavigationControl(
-                    hWnd,
-                    reinterpret_cast<HDC>(wParam),
-                    MulDiv(31, GetWindowDpi(hWnd), USER_DEFAULT_SCREEN_DPI));
-                return result;
-            }
-            if (IsWndClass(hWnd, L"DirectUIHWND") && IsFileDialogItemsView(hWnd)) {
-                const LRESULT result = DefSubclassProc(hWnd, uMsg, wParam, lParam);
-                PaintFileDialogSelectionIndicator(hWnd, reinterpret_cast<HDC>(wParam));
-                return result;
-            }
             if (PaintSpecializedControl(hWnd, reinterpret_cast<HDC>(wParam))) {
                 return 0;
             }
@@ -1925,26 +1664,9 @@ static LRESULT CallWndSubClassProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPAR
         case WM_LBUTTONUP:
         case WM_MOUSEMOVE:
         {
-            if (uMsg == WM_LBUTTONDOWN &&
-                IsWndClass(hWnd, L"DirectUIHWND") &&
-                IsFileDialogItemsView(hWnd)) {
-                UpdateFileDialogSelectionIndicator(hWnd, lParam);
-                const LRESULT result = DefSubclassProc(hWnd, uMsg, wParam, lParam);
-                InvalidateRect(hWnd, nullptr, FALSE);
-                return result;
-            }
             if (IsWndClass(hWnd, L"msctls_trackbar32")) {
                 const LRESULT result = DefSubclassProc(hWnd, uMsg, wParam, lParam);
                 InvalidateRect(hWnd, nullptr, TRUE);
-                return result;
-            }
-            break;
-        }
-        case WM_KEYDOWN:
-        {
-            if (IsWndClass(hWnd, L"DirectUIHWND") && IsFileDialogItemsView(hWnd)) {
-                const LRESULT result = DefSubclassProc(hWnd, uMsg, wParam, lParam);
-                MoveFileDialogSelectionIndicator(hWnd, wParam);
                 return result;
             }
             break;
@@ -1990,7 +1712,6 @@ static LRESULT CallWndSubClassProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPAR
         }
         case WM_NCDESTROY:
         {
-            RemovePropW(hWnd, kFileDialogSelectedRowProperty);
             if (IsTopLevelWindow(hWnd)) {
                 RemovePropW(hWnd, kCommonFileDialogProperty);
             }

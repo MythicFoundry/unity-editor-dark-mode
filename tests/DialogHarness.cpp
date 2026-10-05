@@ -64,12 +64,8 @@ struct FileDialogVisualState {
     bool structureReady = false;
     bool selectedItemFound = false;
     bool selectedItemSelected = false;
-    bool selectionIndicatorPresent = false;
-    bool headerDark = false;
-    bool selectionVisible = false;
-    double headerLightRatio = 1.0;
-    double commandBarLightRatio = 1.0;
-    double selectionChangedRatio = 0.0;
+    bool nativeThemesRetained = false;
+    bool syntheticSelectionStateAbsent = false;
 };
 
 struct WindowSearchState {
@@ -330,79 +326,6 @@ bool CaptureWindow(HWND window, PixelCapture* capture) {
     return painted != FALSE;
 }
 
-RECT ToCaptureBounds(HWND dialog, const RECT& screenBounds) {
-    RECT dialogBounds = {};
-    GetWindowRect(dialog, &dialogBounds);
-    return {
-        screenBounds.left - dialogBounds.left,
-        screenBounds.top - dialogBounds.top,
-        screenBounds.right - dialogBounds.left,
-        screenBounds.bottom - dialogBounds.top
-    };
-}
-
-RECT ToCaptureBounds(HWND dialog, HWND child) {
-    RECT dialogBounds = {};
-    RECT childBounds = {};
-    GetWindowRect(dialog, &dialogBounds);
-    GetWindowRect(child, &childBounds);
-    OffsetRect(&childBounds, -dialogBounds.left, -dialogBounds.top);
-    return childBounds;
-}
-
-double LightPixelRatio(const PixelCapture& capture, RECT bounds) {
-    bounds.left = std::clamp(bounds.left + 4L, 0L, static_cast<LONG>(capture.width));
-    bounds.top = std::clamp(bounds.top + 4L, 0L, static_cast<LONG>(capture.height));
-    bounds.right = std::clamp(bounds.right - 4L, 0L, static_cast<LONG>(capture.width));
-    bounds.bottom = std::clamp(bounds.bottom - 4L, 0L, static_cast<LONG>(capture.height));
-
-    size_t sampled = 0;
-    size_t light = 0;
-    for (LONG y = bounds.top; y < bounds.bottom; y += 2) {
-        for (LONG x = bounds.left; x < bounds.right; x += 2) {
-            const size_t offset = (static_cast<size_t>(y) * capture.width + x) * 4;
-            const BYTE blue = capture.pixels[offset];
-            const BYTE green = capture.pixels[offset + 1];
-            const BYTE red = capture.pixels[offset + 2];
-            const int luminance = (red * 299 + green * 587 + blue * 114) / 1000;
-            ++sampled;
-            if (luminance >= 192) ++light;
-        }
-    }
-    return sampled ? static_cast<double>(light) / sampled : 1.0;
-}
-
-double ChangedPixelRatio(
-    const PixelCapture& before,
-    const PixelCapture& after,
-    RECT bounds) {
-    if (before.width != after.width || before.height != after.height) return 0.0;
-
-    bounds.left = std::clamp(bounds.left, 0L, static_cast<LONG>(before.width));
-    bounds.top = std::clamp(bounds.top, 0L, static_cast<LONG>(before.height));
-    bounds.right = std::clamp(bounds.right, 0L, static_cast<LONG>(before.width));
-    bounds.bottom = std::clamp(bounds.bottom, 0L, static_cast<LONG>(before.height));
-
-    size_t sampled = 0;
-    size_t changed = 0;
-    for (LONG y = bounds.top; y < bounds.bottom; y += 2) {
-        for (LONG x = bounds.left; x < bounds.right; x += 2) {
-            const size_t offset = (static_cast<size_t>(y) * before.width + x) * 4;
-            int maximumDifference = 0;
-            for (size_t channel = 0; channel < 3; ++channel) {
-                maximumDifference = std::max(
-                    maximumDifference,
-                    std::abs(
-                        static_cast<int>(before.pixels[offset + channel]) -
-                        static_cast<int>(after.pixels[offset + channel])));
-            }
-            ++sampled;
-            if (maximumDifference >= 12) ++changed;
-        }
-    }
-    return sampled ? static_cast<double>(changed) / sampled : 0.0;
-}
-
 bool SaveCapture(const PixelCapture& capture, const wchar_t* path) {
     if (!path || !*path || capture.pixels.empty()) return false;
 
@@ -432,8 +355,6 @@ bool SaveCapture(const PixelCapture& capture, const wchar_t* path) {
 bool FindAndSelectAutomationItem(
     HWND dialog,
     const wchar_t* itemName,
-    RECT* itemBounds,
-    PixelCapture* beforeSelection,
     bool* selected) {
     IUIAutomation* automation = nullptr;
     IUIAutomationElement* root = nullptr;
@@ -480,40 +401,13 @@ bool FindAndSelectAutomationItem(
         result = root->FindFirst(TreeScope_Descendants, itemCondition, &item);
         if (SUCCEEDED(result) && !item) result = UIA_E_ELEMENTNOTAVAILABLE;
     }
-    if (SUCCEEDED(result)) result = item->get_CurrentBoundingRectangle(itemBounds);
-    if (SUCCEEDED(result) && !CaptureWindow(dialog, beforeSelection)) {
-        result = E_FAIL;
-    }
     if (SUCCEEDED(result)) {
         result = item->GetCurrentPatternAs(
             UIA_SelectionItemPatternId,
             IID_PPV_ARGS(&selection));
     }
     if (SUCCEEDED(result)) result = item->SetFocus();
-    if (SUCCEEDED(result)) {
-        HWND shellView = FindDescendantWindow(dialog, L"SHELLDLL_DefView");
-        HWND itemsView = shellView
-            ? FindDescendantWindow(shellView, L"DirectUIHWND")
-            : nullptr;
-        POINT itemScreenPoint = {
-            std::min(itemBounds->left + 24, itemBounds->right - 1),
-            (itemBounds->top + itemBounds->bottom) / 2
-        };
-        POINT itemPoint = itemScreenPoint;
-        if (itemsView && ScreenToClient(itemsView, &itemPoint)) {
-            SendMessageW(
-                itemsView,
-                WM_LBUTTONDOWN,
-                MK_LBUTTON,
-                MAKELPARAM(itemPoint.x, itemPoint.y));
-            SendMessageW(
-                itemsView,
-                WM_LBUTTONUP,
-                0,
-                MAKELPARAM(itemPoint.x, itemPoint.y));
-        }
-        result = selection->Select();
-    }
+    if (SUCCEEDED(result)) result = selection->Select();
     if (SUCCEEDED(result)) {
         BOOL isSelected = FALSE;
         result = selection->get_CurrentIsSelected(&isSelected);
@@ -548,6 +442,10 @@ FileDialogVisualState InspectFileDialog(
         ? FindDescendantWindow(shellView, L"DirectUIHWND")
         : nullptr;
     HWND edit = FindDescendantWindow(dialog, L"Edit");
+    state.nativeThemesRetained = navigationBand &&
+        GetWindowTheme(navigationBand) &&
+        edit &&
+        GetWindowTheme(edit);
     state.structureReady = HasImmersiveDarkMode(dialog) &&
         worker &&
         navigationBand &&
@@ -555,41 +453,24 @@ FileDialogVisualState InspectFileDialog(
         shellView &&
         itemsView &&
         edit &&
-        GetWindowTheme(edit) &&
+        state.nativeThemesRetained &&
         PaintsDarkBackground(worker);
     if (!state.structureReady) return state;
 
-    PixelCapture before = {};
-    PixelCapture after = {};
-    RECT selectedItemBounds = {};
     state.selectedItemFound = FindAndSelectAutomationItem(
         dialog,
         selectedFolderName,
-        &selectedItemBounds,
-        &before,
         &state.selectedItemSelected);
     if (!state.selectedItemFound || !state.selectedItemSelected) return state;
 
     Sleep(250);
-    state.selectionIndicatorPresent = GetPropW(
+    state.syntheticSelectionStateAbsent = GetPropW(
         itemsView,
-        L"MythicFoundry.UnityEditorDarkMode.SelectedRow") != nullptr;
-    if (!CaptureWindow(dialog, &after)) return state;
-
-    state.headerLightRatio = LightPixelRatio(after, ToCaptureBounds(dialog, navigationBand));
-    RECT commandBarBounds = ToCaptureBounds(dialog, commandHost);
-    commandBarBounds.bottom = std::min(
-        commandBarBounds.bottom,
-        commandBarBounds.top + MulDiv(31, GetDpiForWindow(commandHost), USER_DEFAULT_SCREEN_DPI));
-    state.commandBarLightRatio = LightPixelRatio(after, commandBarBounds);
-    state.selectionChangedRatio = ChangedPixelRatio(
-        before,
-        after,
-        ToCaptureBounds(dialog, selectedItemBounds));
-    state.headerDark = state.headerLightRatio < 0.25 &&
-        state.commandBarLightRatio < 0.25;
-    state.selectionVisible = state.selectionChangedRatio >= 0.08;
-    if (capturePath && *capturePath) SaveCapture(after, capturePath);
+        L"MythicFoundry.UnityEditorDarkMode.SelectedRow") == nullptr;
+    PixelCapture capture = {};
+    if (capturePath && *capturePath && CaptureWindow(dialog, &capture)) {
+        SaveCapture(capture, capturePath);
+    }
     return state;
 }
 
@@ -603,7 +484,7 @@ void ReportFileDialogThemeState(HWND dialog, const FileDialogVisualState& state)
     HWND edit = FindDescendantWindow(dialog, L"Edit");
     std::fprintf(
         stderr,
-        "IFileDialog state: title=%d WorkerW=%d nav=%d nav-theme=%d shell=%d items=%d edit=%d edit-theme=%d WorkerW-dark=%d structure=%d item=%d selected=%d indicator=%d header-light=%.3f command-light=%.3f selection-change=%.3f.\n",
+        "IFileDialog state: title=%d WorkerW=%d nav=%d nav-theme=%d shell=%d items=%d edit=%d edit-theme=%d WorkerW-dark=%d structure=%d native-themes=%d item=%d selected=%d synthetic-selection=%d.\n",
         HasImmersiveDarkMode(dialog),
         worker != nullptr,
         navigationBand != nullptr,
@@ -614,12 +495,10 @@ void ReportFileDialogThemeState(HWND dialog, const FileDialogVisualState& state)
         edit && GetWindowTheme(edit),
         worker && PaintsDarkBackground(worker),
         state.structureReady,
+        state.nativeThemesRetained,
         state.selectedItemFound,
         state.selectedItemSelected,
-        state.selectionIndicatorPresent,
-        state.headerLightRatio,
-        state.commandBarLightRatio,
-        state.selectionChangedRatio);
+        !state.syntheticSelectionStateAbsent);
 }
 
 INT_PTR CALLBACK WorkerDialogProc(HWND dialog, UINT message, WPARAM, LPARAM lParam) {
@@ -893,9 +772,10 @@ bool VerifyFileDialog() {
             state.selectedFolderName,
             capturePath);
         state.passed = visualState.structureReady &&
-            visualState.headerDark &&
-            visualState.selectionIndicatorPresent &&
-            visualState.selectionVisible;
+            visualState.nativeThemesRetained &&
+            visualState.selectedItemFound &&
+            visualState.selectedItemSelected &&
+            visualState.syntheticSelectionStateAbsent;
         break;
     }
 
@@ -922,7 +802,7 @@ bool VerifyFileDialog() {
         return false;
     }
 
-    Trace("Verified IFileDialog dark navigation band and visible selected-item treatment.");
+    Trace("Verified IFileDialog native shell themes and semantic item selection without synthetic repainting.");
     return true;
 }
 }

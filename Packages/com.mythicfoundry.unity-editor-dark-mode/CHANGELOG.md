@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.0-preview.10
+
+- Remove the unsafe common-file-dialog bitmap recoloring and guessed selection overlay introduced in preview.9.
+- Preserve native shell themes so navigation buttons, breadcrumbs, search controls, and ClearType text retain their Windows rendering.
+- Replace the false-positive pixel regression with checks for retained native themes, semantic item selection, and absence of synthetic selection state.
+
 ## 1.2.0-preview.9
 
 - Normalize the Windows common file dialog's navigation and command surfaces when shell controls ignore their assigned dark theme.

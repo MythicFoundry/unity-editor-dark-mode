@@ -96,13 +96,23 @@ if ($source -cnotmatch '(?s)SetWinEventHook\(\s*EVENT_OBJECT_SHOW,\s*EVENT_OBJEC
 if ($source -cnotmatch 'IsWndClass\(hWnd, L"WorkerW"\)' -or
     $source -cnotmatch '\(style & ES_MULTILINE\) \? L"DarkMode_Explorer" : L"DarkMode_CFD"' -or
     $source -cnotmatch 'SetWindowTheme\(hWnd, L"DarkMode_ItemsView", nullptr\)' -or
-    $source -cnotmatch 'IsFileDialogNavigationControl\(hWnd\)' -or
-    $source -cnotmatch 'ColorizeFileDialogNavigationControl\(hWnd' -or
-    $source -cnotmatch 'PaintFileDialogSelectionIndicator\(hWnd' -or
-    $source -cnotmatch 'kFileDialogSelectedRowProperty' -or
+    $source -cnotmatch 'IsFileDialogShellManagedControl\(hWnd\)' -or
     $source -cnotmatch 'kCommonFileDialogProperty' -or
     $source -cnotmatch 'IsCommonFileDialogWindow\(hWnd\)') {
-    throw 'The native plug-in must theme and verify the common file-dialog shell background, navigation surfaces, edit controls, and item selection indicator.'
+    throw 'The native plug-in must theme the common file-dialog shell background, native controls, edit controls, and item view.'
+}
+$shellManagedThemeBranch = [regex]::Match(
+    $source,
+    '(?s)else if \(IsCommonFileDialogWindow\(hWnd\) && IsFileDialogShellManagedControl\(hWnd\)\) \{(?<Body>.*?)\r?\n\s*\}')
+if (-not $shellManagedThemeBranch.Success -or
+    $shellManagedThemeBranch.Groups['Body'].Value -cmatch 'SetWindowTheme') {
+    throw 'The native plug-in must leave shell-managed common-file-dialog controls on the themes assigned by Windows.'
+}
+if ($source -cmatch 'ColorizeFileDialogNavigationControl' -or
+    $source -cmatch 'PaintFileDialogSelectionIndicator' -or
+    $source -cmatch 'kFileDialogSelectedRowProperty' -or
+    $source -cmatch '#pragma comment\(lib, "msimg32\.lib"\)') {
+    throw 'The native plug-in must not replace shell themes, rewrite rendered navigation pixels, or synthesize selection geometry.'
 }
 foreach ($paintFunction in @('PaintCheckOrRadioButton', 'PaintGroupBox', 'PaintTrackbar', 'PaintHotkeyControl', 'PaintStaticText')) {
     if ($source -cnotmatch "static void $paintFunction\(") {
