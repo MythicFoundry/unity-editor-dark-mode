@@ -5,6 +5,10 @@ param(
 $ErrorActionPreference = 'Stop'
 $bootstrapSource = Get-Content -LiteralPath $BootstrapPath -Raw
 $scenarios = @(
+    [pscustomobject]@{ Name = 'Unity 2018.1'; Defines = @('UNITY_EDITOR_WIN'); PublicWorkerApi = $false; ExperimentalWorkerApi = $false },
+    [pscustomobject]@{ Name = 'Unity 2018.2'; Defines = @('UNITY_EDITOR_WIN'); PublicWorkerApi = $false; ExperimentalWorkerApi = $false },
+    [pscustomobject]@{ Name = 'Unity 2018.3'; Defines = @('UNITY_EDITOR_WIN'); PublicWorkerApi = $false; ExperimentalWorkerApi = $false },
+    [pscustomobject]@{ Name = 'Unity 2018.4'; Defines = @('UNITY_EDITOR_WIN'); PublicWorkerApi = $false; ExperimentalWorkerApi = $false },
     [pscustomobject]@{ Name = 'Unity 2019.1'; Defines = @('UNITY_EDITOR_WIN'); PublicWorkerApi = $false; ExperimentalWorkerApi = $false },
     [pscustomobject]@{ Name = 'Unity 2019.2'; Defines = @('UNITY_EDITOR_WIN'); PublicWorkerApi = $false; ExperimentalWorkerApi = $false },
     [pscustomobject]@{ Name = 'Unity 2019.3'; Defines = @('UNITY_EDITOR_WIN', 'UNITY_2019_3_OR_NEWER'); PublicWorkerApi = $false; ExperimentalWorkerApi = $true },
@@ -87,7 +91,7 @@ $experimentalWorkerType
         $defineOption = "/define:$($scenario.Defines -join ';')"
         $command = @"
 `$ErrorActionPreference = 'Stop'
-Add-Type -Path '$($sourcePath.Replace("'", "''"))' -CompilerOptions '$defineOption'
+Add-Type -Path '$($sourcePath.Replace("'", "''"))' -CompilerOptions @('$defineOption', '/langversion:6')
 "@
         $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
         & (Get-Process -Id $PID).Path -NoLogo -NoProfile -EncodedCommand $encodedCommand

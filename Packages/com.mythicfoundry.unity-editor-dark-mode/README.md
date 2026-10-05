@@ -1,12 +1,14 @@
 # Unity Editor Dark Mode
 
-This package contains the Windows x64 native plug-in and a managed Editor bootstrap for Unity 2019.1 through Unity 6. The bootstrap loads the plug-in after Package Manager registration, selects the Asset Import Worker API available in the current Unity generation, and initializes the plug-in on Unity's main Editor thread; it is not included in player builds.
+This package contains the Windows x64 native plug-in and a managed Editor bootstrap for Unity 2018.1 through Unity 6. The bootstrap loads the plug-in after Package Manager registration, selects the Asset Import Worker API available in the current Unity generation, and initializes the plug-in on Unity's main Editor thread; it is not included in player builds.
 
 Add this Git dependency to your project's `Packages/manifest.json` (use a published tag):
 
 ```json
-"com.mythicfoundry.unity-editor-dark-mode": "https://github.com/MythicFoundry/unity-editor-dark-mode.git?path=/Packages/com.mythicfoundry.unity-editor-dark-mode#v1.2.0-preview.6"
+"com.mythicfoundry.unity-editor-dark-mode": "https://github.com/MythicFoundry/unity-editor-dark-mode.git?path=/Packages/com.mythicfoundry.unity-editor-dark-mode#v1.2.0-preview.12"
 ```
+
+Older Package Manager versions, including versions shipped with Unity 2018, may not support Git dependencies that select a package subfolder with `?path=`. If that URL is rejected, copy this package directory into the project's `Packages` directory as an embedded package. The packaged bootstrap is compile-smoke tested for Unity 2018.1, 2018.2, 2018.3, and 2018.4.
 
 Restart Unity after upgrading because the initialized native module stays pinned for callback safety until the Editor process exits. Do not install this package alongside another copy of `UnityEditorDarkMode.dll` in `Assets/Plugins`; remove the old copy as part of the migration.
 

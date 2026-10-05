@@ -11,7 +11,7 @@ A fully working runtime dark mode mod for Unity Editor on Windows with:
 - Dark Unity-owned native dialogs and progress windows
 - Dark standard controls, including buttons, labels, edit fields, lists, trees, tabs, tooltips, and progress bars
 
-> This runtime mod supports Unity 2019.1 through Unity 6 on Windows 11 x64 and Windows 10 1903+ x64. The managed bootstrap is compile-smoke tested across every Unity API generation in that range; visually validate native Editor surfaces on each Unity and Windows release line before publishing a stable package.
+> This runtime mod supports Unity 2018.1 through Unity 6 on Windows 11 x64 and Windows 10 1903+ x64. The managed bootstrap is compile-smoke tested across every Unity release line in that range; visually validate native Editor surfaces on each Unity and Windows release line before publishing a stable package.
 
 ![Screenshot](screenshot.jpg?raw=true)
 
@@ -20,10 +20,12 @@ A fully working runtime dark mode mod for Unity Editor on Windows with:
 The Windows Editor plug-in is available as `com.mythicfoundry.unity-editor-dark-mode` from a version tag in this repository. After the corresponding tag has been published, add this entry to your Unity project's `Packages/manifest.json` dependencies:
 
 ```json
-"com.mythicfoundry.unity-editor-dark-mode": "https://github.com/MythicFoundry/unity-editor-dark-mode.git?path=/Packages/com.mythicfoundry.unity-editor-dark-mode#v1.2.0-preview.6"
+"com.mythicfoundry.unity-editor-dark-mode": "https://github.com/MythicFoundry/unity-editor-dark-mode.git?path=/Packages/com.mythicfoundry.unity-editor-dark-mode#v1.2.0-preview.12"
 ```
 
 The package includes the native DLL, Windows Editor-only importer settings, and a managed bootstrap that loads and initializes the DLL after Package Manager registration on Unity's main Editor thread. Remove any existing `UnityEditorDarkMode.dll` under `Assets/Plugins` before installing the package; loading both copies is unsupported. Restart Unity after upgrading because the initialized native module stays pinned for callback safety until the Editor process exits.
+
+Older Package Manager versions, including versions shipped with Unity 2018, may not support Git dependencies that select a package subfolder with `?path=`. If that URL is rejected, copy `Packages/com.mythicfoundry.unity-editor-dark-mode` into the project's `Packages` directory as an embedded package. This is an installation-path limitation; the packaged bootstrap is compile-smoke tested for Unity 2018.1, 2018.2, 2018.3, and 2018.4.
 
 Git dependencies contain files committed at the tag. A DLL uploaded as a GitHub Release asset alone is not included in the Unity package dependency.
 
@@ -140,7 +142,7 @@ Ok, so what I have done on top of `ReaperThemeHackDll` is:
     [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern int GetClassName(IntPtr hWnd, char[] lpClassName, int nMaxCount);
     ```
-- `UnityContainerWndClass` has remained consistent across Unity 2019 through Unity 6, but modal and progress-window classes vary. Process ownership and runtime class inspection allow those windows to be covered without hard-coding every top-level class.
+- `UnityContainerWndClass` has remained consistent across the Unity versions observed by this project, but modal and progress-window classes vary. Process ownership and runtime class inspection allow those windows to be covered without hard-coding every top-level class.
 
   > **NOTE:** If you do this, it basically means this hack can be used for any Windows application that uses the default white Win32 title bar, menu bar, context menu, etc.
 - A different color preset is given by default which I think looks better with Unity Editor.

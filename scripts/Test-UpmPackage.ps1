@@ -25,6 +25,9 @@ if ($manifest.version -cnotmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
 if ($ExpectedVersion -and $manifest.version -cne $ExpectedVersion) {
     throw "Package version $($manifest.version) does not match expected $ExpectedVersion."
 }
+if ($manifest.unity -cne '2018.1') {
+    throw "Package minimum Unity version $($manifest.unity) does not match supported minimum 2018.1."
+}
 
 foreach ($requiredFile in @($dllPath, $metaPath, $configPath, "$configPath.meta", $bootstrapPath, "$bootstrapPath.meta", $assemblyDefinitionPath, "$assemblyDefinitionPath.meta", (Join-Path $packageRoot 'LICENSE.md'))) {
     if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {

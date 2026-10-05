@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.0-preview.12
+
+- Extend the declared minimum Editor version from Unity 2019.1 to Unity 2018.1.
+- Add compile-smoke coverage for Unity 2018.1, 2018.2, 2018.3, and 2018.4 while preserving all newer Unity compatibility profiles.
+- Keep the Asset Import Worker guard disabled on Unity releases that do not expose either supported worker-process API.
+
 ## 1.2.0-preview.11
 
 - Restore the declared Unity 2019.1 compatibility by selecting the available Asset Import Worker API for each Unity generation.
